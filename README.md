@@ -7,4 +7,4 @@ Usage:
     python download_symbols.py -xml=path/to/kphdyn.xml -symboldir=C:/Symbols [-arch=amd64] [-version=10.0.19041] [-symbol_server=https//msdl.microsoft.com/download/symbols]
 
 Requirements:
-    pip install pefile requests
+    `pip install pefile requests`
