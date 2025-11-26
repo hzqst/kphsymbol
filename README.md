@@ -3,9 +3,9 @@
 Downloads PE files and their corresponding PDB symbol files from Microsoft Symbol Server
 based on entries in [kphdyn.xml](https://github.com/winsiderss/systeminformer/blob/master/kphlib/kphdyn.xml).
 
-Usage:
+Usage, [] for optional:
 ```
-    python download_symbols.py -xml=path/to/kphdyn.xml -symboldir=C:/Symbols [-arch=amd64] [-version=10.0.19041] [-symbol_server=https//msdl.microsoft.com/download/symbols]
+    python download_symbols.py -xml=path/to/kphdyn.xml -symboldir=C:/Symbols [-arch=amd64] [-version=10.0.10240.16393] [-symbol_server=https//msdl.microsoft.com/download/symbols]
 ```
 
 Requirements:
