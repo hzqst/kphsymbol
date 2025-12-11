@@ -1,6 +1,6 @@
-## Symbol Download Script for KPH Dynamic Data
+## Toolkits for KPH Dynamic Data
 
-Toolkits for [kphdyn.xml](https://github.com/winsiderss/systeminformer/blob/master/kphlib/kphdyn.xml).
+[kphdyn.xml](https://github.com/winsiderss/systeminformer/blob/master/kphlib/kphdyn.xml).
 
 Requirements:
 ```
