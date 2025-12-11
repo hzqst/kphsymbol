@@ -7,7 +7,7 @@ Requirements:
 pip install pefile requests
 ```
 
-## Download PE & Symbol listed in kphdyn.xml from msdl
+## Download PE & Symbol listed in kphdyn.xml
 
 Downloads PE files and their corresponding PDB symbol files from Microsoft Symbol Server
 based on entries from `kphdyn.xml`
@@ -32,7 +32,14 @@ C:\Symbols\amd64\ntoskrnl.exe.10.0.10240.16393\ntkrnlmp.pdb
 python update_symbols.py -xml="path/to/kphdyn.xml" -symbol="EPROCESS->Protection" -symname="EpProtection"
 ```
 
-Adds `EpProtection` to `kphdyn.xml`
+Adds offset with `EpProtection` to `kphdyn.xml`
+
+```
+<fields id="15">
+        //......others
+        <field value="0x0672" name="EpProtection" />
+</fields>
+```
 
 ## Add new ntoskrnl entry to kphdyn.xml with known MD5/SHA256
 
