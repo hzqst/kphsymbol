@@ -40,6 +40,10 @@ Adds `EpProtection` to `kphdyn.xml`
 python add_ntoskrnl_from_virustotal.py -xml="path/to/kphdyn.xml" -md5=9F4D868D410F6D68D0A73C9139D754B0 -apikey="{YourAPIKey}"
 ```
 
-An entry `9F4D868D410F6D68D0A73C9139D754B0  10.0.26100.5067 (amd64)` will be added to `kphdyn.xml`
+A new entry :
 
-Get a valid api key from https://www.virustotal.com/
+`<data arch="amd64" version="10.0.26100.5067" file="ntoskrnl.exe" hash="eef546d98c2ee3c006756c47bad46c62157d6f43bc8204e2679d3895efbc33c2" timestamp="0x66ffa119" size="0x0144f000">25</data>`
+
+will be added to `kphdyn.xml` if file with given has was found on virustotal.
+
+* Get a valid api key from https://www.virustotal.com/
