@@ -39,6 +39,8 @@ except ImportError as e:
 
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
 UPLOAD_DIR = 'uploads'
+ALLOW_FILENAME = ['ntoskrnl.exe', 'ntkrnlmp.exe', 'ntkrla57.exe']
+ALLOW_FILEDESC = ['NT Kernel & System']
 
 
 def parse_args():
@@ -106,12 +108,16 @@ def verify_pe_file(file_data):
                                         elif key == b'FileVersion':
                                             file_version = value.decode('utf-8', errors='ignore')
         
-        # Verify FileDescription
-        if file_description != 'NT Kernel & System':
+        # Verify FileDescription is in allowed list
+        if file_description not in ALLOW_FILEDESC:
             return None
         
         # Check required fields
         if not original_filename or not file_version:
+            return None
+        
+        # Verify OriginalFilename is in allowed list
+        if original_filename.lower() not in [name.lower() for name in ALLOW_FILENAME]:
             return None
         
         # Normalize filename: if OriginalFilename is ntkrnlmp.exe, use ntoskrnl.exe
