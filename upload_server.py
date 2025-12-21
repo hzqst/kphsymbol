@@ -86,16 +86,24 @@ def verify_pe_file(file_data):
         file_version = None
         
         if hasattr(pe, 'FileInfo') and pe.FileInfo:
-            for fileinfo in pe.FileInfo:
-                if fileinfo.Key == b'StringFileInfo':
-                    for st in fileinfo.StringTable:
-                        for key, value in st.entries.items():
-                            if key == b'FileDescription':
-                                file_description = value.decode('utf-8')
-                            elif key == b'OriginalFilename':
-                                original_filename = value.decode('utf-8')
-                            elif key == b'FileVersion':
-                                file_version = value.decode('utf-8')
+            # FileInfo is a list of lists, where each inner list contains structures
+            for fileinfo_list in pe.FileInfo:
+                if not isinstance(fileinfo_list, list):
+                    continue
+                for fileinfo in fileinfo_list:
+                    # Check if this structure has a Key attribute and it's StringFileInfo
+                    if hasattr(fileinfo, 'Key') and fileinfo.Key == b'StringFileInfo':
+                        # Check if it has StringTable attribute
+                        if hasattr(fileinfo, 'StringTable') and fileinfo.StringTable:
+                            for st in fileinfo.StringTable:
+                                if hasattr(st, 'entries') and st.entries:
+                                    for key, value in st.entries.items():
+                                        if key == b'FileDescription':
+                                            file_description = value.decode('utf-8', errors='ignore')
+                                        elif key == b'OriginalFilename':
+                                            original_filename = value.decode('utf-8', errors='ignore')
+                                        elif key == b'FileVersion':
+                                            file_version = value.decode('utf-8', errors='ignore')
         
         # Verify FileDescription
         if file_description != 'NT Kernel & System':
