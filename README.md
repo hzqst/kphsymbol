@@ -78,13 +78,7 @@ Example:
 - If `-symboldir="C:/Symbols"`, `arch=amd64`, `FileName=ntoskrnl.exe`, `FileVersion=10.0.22621.741`
 - File will be stored at: `C:/Symbols/amd64/ntoskrnl.exe.10.0.22621.741/ntoskrnl.exe`
 
-Upload your ntoskrnl to localhost server:
-
-```
-curl -X POST -F "file=@C:/Windows/System32/ntoskrnl.exe" http://localhost:8000/upload
-```
-
-Test that checks if your ntoskrnl already exists:
+Checks if your ntoskrnl already exists:
 
 ```
 curl "http://localhost:8000/exists?filename=ntoskrnl.exe&arch=amd64&fileversion=10.0.26100.7462"
@@ -98,6 +92,12 @@ Found:
 Not found:
 ```
 {"success": true, "message": "File existence checked", "filename": "ntoskrnl.exe", "arch": "amd64", "fileversion": "10.0.26100.7461", "exists": false, "path": "amd64/ntoskrnl.exe.10.0.26100.7461/ntoskrnl.exe"}
+```
+
+Upload your ntoskrnl to localhost server:
+
+```
+curl -X POST -F "file=@C:/Windows/System32/ntoskrnl.exe" http://localhost:8000/upload
 ```
 
 * File size limit: 20MB
