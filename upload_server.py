@@ -23,6 +23,7 @@ import http.server
 import socketserver
 import json
 from io import BytesIO
+from urllib.parse import urlparse, parse_qs
 import re
 
 try:
@@ -418,6 +419,85 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.end_headers()
         self.wfile.write(response_json.encode('utf-8'))
+    
+    def send_error(self, code, message=None, explain=None):
+        """
+        Override send_error to return JSON instead of HTML.
+        
+        Args:
+            code: HTTP status code
+            message: Error message
+            explain: Additional explanation (ignored, message is used instead)
+        """
+        if message is None:
+            # Default messages for common status codes
+            messages = {
+                400: "Bad Request",
+                401: "Unauthorized",
+                403: "Forbidden",
+                404: "Not Found",
+                405: "Method Not Allowed",
+                500: "Internal Server Error",
+                501: "Not Implemented",
+                502: "Bad Gateway",
+                503: "Service Unavailable",
+            }
+            message = messages.get(code, f"Error {code}")
+        
+        self.send_json_response(code, message)
+    
+    def do_GET(self):
+        """Handle GET requests to /exists."""
+        parsed_url = urlparse(self.path)
+        
+        if parsed_url.path != '/exists':
+            self.send_json_response(404, "Not Found")
+            return
+        
+        # Parse query parameters
+        query_params = parse_qs(parsed_url.query)
+        
+        # Get required parameters
+        filename = query_params.get('filename', [None])[0]
+        arch = query_params.get('arch', [None])[0]
+        fileversion = query_params.get('fileversion', [None])[0]
+        
+        # Validate required parameters
+        if not filename or not arch or not fileversion:
+            self.send_json_response(400, "Missing required parameters: filename, arch, and fileversion are required")
+            return
+        
+        # Build file path: {symboldir}/{arch}/{filename}.{fileversion}/{filename}
+        target_dir = os.path.join(self.symboldir, arch, f"{filename}.{fileversion}")
+        target_path = os.path.join(target_dir, filename)
+        
+        # Build relative path (relative to symboldir) for response
+        # Format: {arch}/{filename}.{fileversion}/{filename}
+        relative_path = os.path.join(arch, f"{filename}.{fileversion}", filename)
+        # Normalize path separators to forward slashes for consistency
+        relative_path = relative_path.replace(os.sep, '/')
+        
+        # Check if file exists
+        file_exists = os.path.exists(target_path) and os.path.isfile(target_path)
+        
+        # Prepare response data
+        response_data = {
+            'filename': filename,
+            'arch': arch,
+            'fileversion': fileversion,
+            'exists': file_exists,
+            'path': relative_path
+        }
+        
+        if file_exists:
+            # Get file size
+            try:
+                file_size = os.path.getsize(target_path)
+                response_data['file_size'] = file_size
+            except OSError:
+                pass
+        
+        self.send_json_response(200, "File existence checked", response_data)
     
     def do_POST(self):
         """Handle POST requests to /upload."""

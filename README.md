@@ -83,5 +83,11 @@ Test that upload your ntoskrnl to localhost server:
 curl -X POST -F "file=@C:/Windows/System32/ntoskrnl.exe" http://localhost:8000/upload
 ```
 
+Test that checks if your ntoskrnl exists:
+
+```
+curl "http://localhost:8000/exists?filename=ntoskrnl.exe&arch=amd64&fileversion=10.0.26100.7462"
+```
+
 * File size limit: 20MB
 * If the target file already exists, it will not be overwritten
