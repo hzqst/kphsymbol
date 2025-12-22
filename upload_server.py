@@ -5,6 +5,13 @@ File Upload Server for KPH Dynamic Data
 HTTP server that handles file uploads, validates PE files and digital signatures,
 and stores files in the symbol directory structure.
 
+Supports two upload formats:
+    1. multipart/form-data: Traditional form-based file upload
+    2. application/octet-stream: Raw binary file upload
+
+Optional features:
+    - X-File-Compressed: gzip header to indicate gzip-compressed file
+
 Usage:
     python upload_server.py -symboldir=C:/Symbols [-port=8000]
     
@@ -527,34 +534,46 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
             self.send_json_response(400, "No file data")
             return
         
-        # Check Content-Type
-        content_type = self.headers.get('Content-Type', '')
-        if not content_type.startswith('multipart/form-data'):
-            self.send_json_response(400, "Content-Type must be multipart/form-data")
-            return
+        # Check Content-Type and handle accordingly
+        content_type = self.headers.get('Content-Type', '').lower()
+        file_data = None
         
-        # Parse multipart form data
-        try:
-            form = parse_multipart_form_data(self.rfile, content_type, content_length)
-        except Exception as e:
-            self.send_json_response(400, f"Failed to parse form data: {e}")
-            return
+        if content_type.startswith('multipart/form-data'):
+            # Handle multipart/form-data format
+            try:
+                form = parse_multipart_form_data(self.rfile, content_type, content_length)
+            except Exception as e:
+                self.send_json_response(400, f"Failed to parse form data: {e}")
+                return
+            
+            # Get uploaded file
+            if 'file' not in form:
+                self.send_json_response(400, "No file in request")
+                return
+            
+            file_item = form['file']
+            if not file_item.filename:
+                self.send_json_response(400, "No filename provided")
+                return
+            
+            # Read file data
+            try:
+                file_data = file_item.file.read()
+            except Exception as e:
+                self.send_json_response(400, f"Failed to read file data: {e}")
+                return
         
-        # Get uploaded file
-        if 'file' not in form:
-            self.send_json_response(400, "No file in request")
-            return
+        elif content_type.startswith('application/octet-stream') or content_type == '':
+            # Handle application/octet-stream format (or missing Content-Type)
+            # Read file data directly from request body
+            try:
+                file_data = self.rfile.read(content_length)
+            except Exception as e:
+                self.send_json_response(400, f"Failed to read file data: {e}")
+                return
         
-        file_item = form['file']
-        if not file_item.filename:
-            self.send_json_response(400, "No filename provided")
-            return
-        
-        # Read file data
-        try:
-            file_data = file_item.file.read()
-        except Exception as e:
-            self.send_json_response(400, f"Failed to read file data: {e}")
+        else:
+            self.send_json_response(400, "Content-Type must be multipart/form-data or application/octet-stream")
             return
         
         # Verify file size does not exceed maximum allowed size (compressed size)
