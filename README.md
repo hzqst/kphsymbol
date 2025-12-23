@@ -22,6 +22,11 @@ System dependencies (for signify library, required on Linux):
   sudo dnf install -y openssl-devel
   ```
 
+- **Fix oscrypto issue -- Error detecting the version of libcrypto :**
+```bash
+  pip install -I git+https://github.com/wbond/oscrypto.git --break-system-packages
+```
+
 **Troubleshooting:** If you encounter `LibraryNotFoundError: Error detecting the version of libcrypto`:
 1. Ensure `libssl-dev` (or `openssl-devel`) is installed (not just `openssl`)
 2. Upgrade `oscrypto` library (especially important for OpenSSL 3.x):
