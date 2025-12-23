@@ -6,7 +6,7 @@ Requirements:
 
 Python packages:
 ```bash
-pip install pefile requests signify
+pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --break-system-packages
 ```
 
 System dependencies (for signify library, required on Linux):
