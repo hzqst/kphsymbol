@@ -102,3 +102,5 @@ curl -X POST -F "file=@C:/Windows/System32/ntoskrnl.exe" http://localhost:8000/u
 
 * File size limit: 20MB
 * If the target file already exists, it will not be overwritten
+* Both "multipart/form-data" and "application/octet-stream" are supported
+* Header "X-File-Compressed: gzip" supported, client should gzip the ntoskrnl payload before uploading.
