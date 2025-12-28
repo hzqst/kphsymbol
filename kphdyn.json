@@ -112,7 +112,7 @@
             },
             {
                 "name" : "MmSectionControlArea",
-                "symbol" : "_SECTION->u1.ControlArea"
+                "symbol" : "_SECTION->u1.ControlArea,_SECTION_OBJECT->Segment"
             },
             {
                 "name" : "MmControlAreaListHead",
@@ -129,10 +129,6 @@
             {
                 "name" : "EpProtection",
                 "symbol" : "_EPROCESS->Protection"
-            },
-            {
-                "name" : "KtPrevMode",
-                "symbol" : "_KTHREAD->PreviousMode"
             }
         ]
     }

@@ -52,6 +52,11 @@ def parse_args():
         required=True,
         help="Path to the JSON config file (e.g., kphdyn.json)"
     )
+    parser.add_argument(
+        "-debug",
+        action="store_true",
+        help="Enable debug logging for symbol parsing"
+    )
 
     args = parser.parse_args()
 
@@ -113,7 +118,7 @@ def load_json_config(json_path):
 
 def parse_symbol(symbol_str):
     """
-    Parse symbol string into structure name and member name.
+    Parse a single symbol string into structure name and member name.
 
     Args:
         symbol_str: Symbol string like "_EPROCESS->SectionObject" or "_ALPC_PORT->u1.State"
@@ -138,6 +143,21 @@ def parse_symbol(symbol_str):
         struct_name = "_" + struct_name
 
     return struct_name, member_name
+
+
+def parse_symbol_with_fallback(symbol_str):
+    """
+    Parse symbol string that may contain fallback alternatives.
+
+    Args:
+        symbol_str: Symbol string, optionally with comma-separated fallbacks
+                   e.g., "_SECTION->u1.ControlArea,_SECTION_OBJECT->Segment"
+
+    Returns:
+        List of (struct_name, member_name) tuples
+    """
+    alternatives = [s.strip() for s in symbol_str.split(",")]
+    return [parse_symbol(alt) for alt in alternatives]
 
 
 def get_all_entries_for_files(root, file_list):
@@ -253,7 +273,7 @@ def run_llvm_pdbutil(pdb_path):
         return None
 
 
-def parse_llvm_pdbutil_output(output, struct_name, member_name):
+def parse_llvm_pdbutil_output(output, struct_name, member_name, debug=False):
     """
     Parse llvm-pdbutil dump output to find member offset.
 
@@ -264,6 +284,7 @@ def parse_llvm_pdbutil_output(output, struct_name, member_name):
         output: llvm-pdbutil output string
         struct_name: Structure name to find (e.g., _EPROCESS)
         member_name: Member name to find offset for (e.g., Protection or u1.State)
+        debug: Enable debug logging
 
     Returns:
         Offset as integer, or None if not found
@@ -276,33 +297,56 @@ def parse_llvm_pdbutil_output(output, struct_name, member_name):
         parent_member = parts[0]
         nested_member = parts[1]
 
+        if debug:
+            print(f"    [DEBUG] Nested member: {struct_name}->{parent_member}.{nested_member}")
+
         # First, find the parent member's offset and type
-        parent_offset = find_member_offset(lines, struct_name, parent_member)
+        parent_offset = find_member_offset(lines, struct_name, parent_member, debug)
         if parent_offset is None:
+            if debug:
+                print(f"    [DEBUG] Parent member '{parent_member}' not found in '{struct_name}'")
             return None
+
+        if debug:
+            print(f"    [DEBUG] Parent offset: {parent_offset} (0x{parent_offset:x})")
 
         # Find the type of the parent member to get nested member offset
-        parent_type = find_member_type(lines, struct_name, parent_member)
-        if parent_type is None:
+        parent_type_name, parent_type_id = find_member_type(lines, struct_name, parent_member, debug)
+
+        if parent_type_id is None:
+            if debug:
+                print(f"    [DEBUG] Parent type ID not found, trying direct member search")
             # Try to find nested member by searching for it as a direct member
             # This handles anonymous unions/structs
-            nested_offset = find_member_offset(lines, struct_name, nested_member)
+            nested_offset = find_member_offset(lines, struct_name, nested_member, debug)
             if nested_offset is not None:
+                if debug:
+                    print(f"    [DEBUG] Found nested member as direct member: offset={nested_offset}")
                 return nested_offset
+            if debug:
+                print(f"    [DEBUG] Nested member '{nested_member}' not found as direct member")
             return None
 
-        # Get the offset of nested member within the parent type
-        nested_offset = find_member_offset(lines, parent_type, nested_member)
+        if debug:
+            print(f"    [DEBUG] Parent type: {parent_type_name} (ID: {parent_type_id})")
+
+        # Get the offset of nested member within the parent type using type ID
+        nested_offset = find_member_offset_by_type_id(lines, parent_type_id, nested_member, debug)
         if nested_offset is None:
+            if debug:
+                print(f"    [DEBUG] Nested member '{nested_member}' not found in type {parent_type_id}")
             return None
+
+        if debug:
+            print(f"    [DEBUG] Nested offset: {nested_offset}, total: {parent_offset + nested_offset}")
 
         return parent_offset + nested_offset
 
     # Simple member (no nesting)
-    return find_member_offset(lines, struct_name, member_name)
+    return find_member_offset(lines, struct_name, member_name, debug)
 
 
-def find_member_offset(lines, struct_name, member_name):
+def find_member_offset(lines, struct_name, member_name, debug=False):
     """
     Find the offset of a member within a structure.
 
@@ -310,6 +354,7 @@ def find_member_offset(lines, struct_name, member_name):
         lines: List of output lines
         struct_name: Structure name
         member_name: Member name
+        debug: Enable debug logging
 
     Returns:
         Offset as integer, or None if not found
@@ -317,15 +362,22 @@ def find_member_offset(lines, struct_name, member_name):
     # Step 1: Find the structure definition and get its field list ID
     field_list_id = None
 
+    # Try LF_STRUCTURE first
     for i, line in enumerate(lines):
         if "LF_STRUCTURE" in line and f"`{struct_name}`" in line:
+            if debug:
+                print(f"    [DEBUG] Found LF_STRUCTURE for '{struct_name}' at line {i}")
             for j in range(i + 1, min(i + 10, len(lines))):
                 next_line = lines[j]
                 if "forward ref" in next_line:
+                    if debug:
+                        print(f"    [DEBUG] Skipping forward reference")
                     break
                 field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
                 if field_list_match:
                     field_list_id = field_list_match.group(1)
+                    if debug:
+                        print(f"    [DEBUG] Found field list ID: {field_list_id}")
                     break
 
             if field_list_id:
@@ -335,19 +387,56 @@ def find_member_offset(lines, struct_name, member_name):
     if not field_list_id:
         for i, line in enumerate(lines):
             if "LF_UNION" in line and f"`{struct_name}`" in line:
+                if debug:
+                    print(f"    [DEBUG] Found LF_UNION for '{struct_name}' at line {i}")
                 for j in range(i + 1, min(i + 10, len(lines))):
                     next_line = lines[j]
                     if "forward ref" in next_line:
+                        if debug:
+                            print(f"    [DEBUG] Skipping forward reference")
                         break
                     field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
                     if field_list_match:
                         field_list_id = field_list_match.group(1)
+                        if debug:
+                            print(f"    [DEBUG] Found field list ID: {field_list_id}")
+                        break
+
+                if field_list_id:
+                    break
+
+    # Try LF_CLASS as fallback
+    if not field_list_id:
+        for i, line in enumerate(lines):
+            if "LF_CLASS" in line and f"`{struct_name}`" in line:
+                if debug:
+                    print(f"    [DEBUG] Found LF_CLASS for '{struct_name}' at line {i}")
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    next_line = lines[j]
+                    if "forward ref" in next_line:
+                        if debug:
+                            print(f"    [DEBUG] Skipping forward reference")
+                        break
+                    field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
+                    if field_list_match:
+                        field_list_id = field_list_match.group(1)
+                        if debug:
+                            print(f"    [DEBUG] Found field list ID: {field_list_id}")
                         break
 
                 if field_list_id:
                     break
 
     if not field_list_id:
+        if debug:
+            print(f"    [DEBUG] No field list ID found for '{struct_name}'")
+            # Try to find any mention of the struct name for debugging
+            for i, line in enumerate(lines):
+                if struct_name in line:
+                    print(f"    [DEBUG] Found '{struct_name}' mention at line {i}: {line.strip()[:100]}")
+                    if i < 5:  # Only show first few matches
+                        continue
+                    break
         return None
 
     # Step 2: Find the LF_FIELDLIST with this ID and search for the member
@@ -356,6 +445,8 @@ def find_member_offset(lines, struct_name, member_name):
     for line in lines:
         if f"{field_list_id} | LF_FIELDLIST" in line:
             in_field_list = True
+            if debug:
+                print(f"    [DEBUG] Entered field list {field_list_id}")
             continue
 
         if in_field_list and re.match(r'\s*0x[0-9a-fA-F]+\s*\|\s*LF_', line):
@@ -368,12 +459,17 @@ def find_member_offset(lines, struct_name, member_name):
                 line
             )
             if match:
-                return int(match.group(1))
+                offset = int(match.group(1))
+                if debug:
+                    print(f"    [DEBUG] Found member '{member_name}' with offset {offset}")
+                return offset
 
+    if debug:
+        print(f"    [DEBUG] Member '{member_name}' not found in field list {field_list_id}")
     return None
 
 
-def find_member_type(lines, struct_name, member_name):
+def find_member_type(lines, struct_name, member_name, debug=False):
     """
     Find the type of a member within a structure.
 
@@ -381,9 +477,10 @@ def find_member_type(lines, struct_name, member_name):
         lines: List of output lines
         struct_name: Structure name
         member_name: Member name
+        debug: Enable debug logging
 
     Returns:
-        Type name as string, or None if not found
+        Tuple of (type_name, type_id) or (None, None) if not found
     """
     # Find the structure's field list ID
     field_list_id = None
@@ -403,7 +500,9 @@ def find_member_type(lines, struct_name, member_name):
                 break
 
     if not field_list_id:
-        return None
+        if debug:
+            print(f"    [DEBUG] find_member_type: No field list for '{struct_name}'")
+        return None, None
 
     # Find the member and extract its type
     in_field_list = False
@@ -425,10 +524,14 @@ def find_member_type(lines, struct_name, member_name):
             )
             if match:
                 type_id = match.group(1)
+                if debug:
+                    print(f"    [DEBUG] find_member_type: Found type ID {type_id} for '{member_name}'")
                 break
 
     if not type_id:
-        return None
+        if debug:
+            print(f"    [DEBUG] find_member_type: No type ID found for '{member_name}'")
+        return None, None
 
     # Find the type definition to get its name
     for i, line in enumerate(lines):
@@ -436,18 +539,100 @@ def find_member_type(lines, struct_name, member_name):
             # Extract type name from the line
             name_match = re.search(r'`([^`]+)`', line)
             if name_match:
-                return name_match.group(1)
+                type_name = name_match.group(1)
+                if debug:
+                    print(f"    [DEBUG] find_member_type: Type {type_id} is '{type_name}'")
+                return type_name, type_id
+            else:
+                if debug:
+                    print(f"    [DEBUG] find_member_type: Type {type_id} has no name, line: {line.strip()}")
+                return None, type_id
 
+    if debug:
+        print(f"    [DEBUG] find_member_type: Type definition for {type_id} not found")
+    return None, None
+
+
+def find_member_offset_by_type_id(lines, type_id, member_name, debug=False):
+    """
+    Find the offset of a member within a structure/union identified by type ID.
+
+    Args:
+        lines: List of output lines
+        type_id: Type ID (e.g., 0x1B3D)
+        member_name: Member name
+        debug: Enable debug logging
+
+    Returns:
+        Offset as integer, or None if not found
+    """
+    # Find the type definition and get its field list ID
+    field_list_id = None
+
+    for i, line in enumerate(lines):
+        if f"{type_id} | LF_" in line and ("LF_STRUCTURE" in line or "LF_UNION" in line):
+            if debug:
+                print(f"    [DEBUG] Found type {type_id} at line {i}: {line.strip()[:80]}")
+            for j in range(i + 1, min(i + 10, len(lines))):
+                next_line = lines[j]
+                if "forward ref" in next_line:
+                    if debug:
+                        print(f"    [DEBUG] Skipping forward reference for {type_id}")
+                    break
+                field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
+                if field_list_match:
+                    field_list_id = field_list_match.group(1)
+                    if debug:
+                        print(f"    [DEBUG] Type {type_id} has field list ID: {field_list_id}")
+                    break
+
+            if field_list_id:
+                break
+
+    if not field_list_id:
+        if debug:
+            print(f"    [DEBUG] No field list ID found for type {type_id}")
+        return None
+
+    # Find the LF_FIELDLIST with this ID and search for the member
+    in_field_list = False
+
+    for line in lines:
+        if f"{field_list_id} | LF_FIELDLIST" in line:
+            in_field_list = True
+            if debug:
+                print(f"    [DEBUG] Entered field list {field_list_id} for type {type_id}")
+            continue
+
+        if in_field_list and re.match(r'\s*0x[0-9a-fA-F]+\s*\|\s*LF_', line):
+            in_field_list = False
+            continue
+
+        if in_field_list:
+            match = re.search(
+                rf'LF_MEMBER\s*\[name\s*=\s*`{re.escape(member_name)}`.*offset\s*=\s*(\d+)',
+                line
+            )
+            if match:
+                offset = int(match.group(1))
+                if debug:
+                    print(f"    [DEBUG] Found member '{member_name}' in type {type_id} with offset {offset}")
+                return offset
+
+    if debug:
+        print(f"    [DEBUG] Member '{member_name}' not found in type {type_id} field list {field_list_id}")
     return None
 
 
-def parse_pdb_all_symbols(pdb_path, symbols_list):
+def parse_pdb_all_symbols(pdb_path, symbols_list, debug=False):
     """
     Parse PDB file to get offsets for all symbols.
 
     Args:
         pdb_path: Path to the PDB file
         symbols_list: List of symbol dicts with "name" and "symbol" keys
+                      Symbol can contain comma-separated fallbacks
+        debug: Enable debug logging
 
     Returns:
         Dict mapping symbol name to offset, or None if any symbol is missing
@@ -461,12 +646,33 @@ def parse_pdb_all_symbols(pdb_path, symbols_list):
         name = sym["name"]
         symbol_str = sym["symbol"]
 
-        struct_name, member_name = parse_symbol(symbol_str)
-        offset = parse_llvm_pdbutil_output(output, struct_name, member_name)
+        # Parse symbol with fallback support
+        alternatives = parse_symbol_with_fallback(symbol_str)
+
+        if debug:
+            if len(alternatives) > 1:
+                print(f"    [DEBUG] Parsing symbol: {symbol_str} (with {len(alternatives)} alternatives)")
+            else:
+                struct_name, member_name = alternatives[0]
+                print(f"    [DEBUG] Parsing symbol: {symbol_str} -> {struct_name}->{member_name}")
+
+        offset = None
+        used_alternative = None
+        for struct_name, member_name in alternatives:
+            offset = parse_llvm_pdbutil_output(output, struct_name, member_name, debug)
+            if offset is not None:
+                used_alternative = f"{struct_name}->{member_name}"
+                break
 
         if offset is None:
             print(f"  Error: Symbol not found: {symbol_str}")
             return None
+
+        if debug:
+            if len(alternatives) > 1 and used_alternative:
+                print(f"    [DEBUG] Result: {name} = 0x{offset:04x} (using {used_alternative})")
+            else:
+                print(f"    [DEBUG] Result: {name} = 0x{offset:04x}")
 
         offsets[name] = offset
 
@@ -601,6 +807,7 @@ def main():
     xml_path = args.xml
     symboldir = args.symboldir
     json_path = args.json
+    debug = args.debug
 
     # Validate paths
     if not os.path.exists(xml_path):
@@ -616,6 +823,9 @@ def main():
     file_list, symbols_list = load_json_config(json_path)
     print(f"  Files to process: {file_list}")
     print(f"  Symbols to extract: {len(symbols_list)}")
+
+    if debug:
+        print(f"  Debug mode: enabled")
 
     # Parse XML
     print(f"\nParsing XML: {xml_path}")
@@ -665,7 +875,7 @@ def main():
                 continue
 
             print(f"  Parsing PDB: {pdb_path}")
-            offsets = parse_pdb_all_symbols(pdb_path, symbols_list)
+            offsets = parse_pdb_all_symbols(pdb_path, symbols_list, debug)
 
             if offsets is None:
                 print(f"  Failed to extract all symbols")
