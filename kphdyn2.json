@@ -116,7 +116,11 @@
             },
             {
                 "name" : "MmSectionSegment",
-                "symbol" : "_SECTION_OBJECT->Segment,_SEGMENT->ControlArea"
+                "symbol" : "_SECTION_OBJECT->Segment"
+            },
+            {
+                "name" : "MmSegmentControlArea",
+                "symbol" : "_SEGMENT->ControlArea,_SEGMENT_OBJECT->ControlArea"
             },
             {
                 "name" : "MmControlAreaListHead",
@@ -129,6 +133,10 @@
             {
                 "name" : "EpSectionObject",
                 "symbol" : "_EPROCESS->SectionObject"
+            },
+            {
+                "name" : "EpProtection",
+                "symbol" : "_EPROCESS->Protection"
             }
         ]
     }
