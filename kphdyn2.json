@@ -135,10 +135,6 @@
                 "var_offset" : "PspCreateProcessNotifyRoutine"
             },
             {
-                "name" : "PspCreateProcessNotifyRoutine",
-                "var_offset" : "PspCreateProcessNotifyRoutine"
-            },
-            {
                 "name" : "ExReferenceCallBackBlock",
                 "fn_offset" : "ExReferenceCallBackBlock"
             },
