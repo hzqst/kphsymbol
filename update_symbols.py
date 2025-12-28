@@ -6,6 +6,7 @@ Updates field offsets in kphdyn.xml by parsing PDB files using llvm-pdbutil.
 
 Usage:
     python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -json kphdyn.json
+    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -json kphdyn.json -sha256 <hash>
 
 JSON Config Format:
     [
@@ -23,6 +24,9 @@ Symbol Types:
     - struct_offset: Structure member offset (e.g., "_EPROCESS->ObjectTable")
     - var_offset: Global variable offset (e.g., "PspCreateProcessNotifyRoutine")
     - fn_offset: Function offset (e.g., "ExReferenceCallBackBlock")
+
+Optional Arguments:
+    -sha256: Only process entries with this SHA256 hash value (case-insensitive)
 
 Requirements:
     - llvm-pdbutil must be available in system PATH
@@ -73,6 +77,10 @@ def parse_args():
         "-debug",
         action="store_true",
         help="Enable debug logging for symbol parsing"
+    )
+    parser.add_argument(
+        "-sha256",
+        help="Only process entries with this SHA256 hash value"
     )
 
     args = parser.parse_args()
@@ -183,13 +191,14 @@ def parse_symbol_with_fallback(symbol_str):
     return [parse_symbol(alt) for alt in alternatives]
 
 
-def get_all_entries_for_files(root, file_list):
+def get_all_entries_for_files(root, file_list, sha256_filter=None):
     """
     Get all <data> elements matching any file in file_list.
 
     Args:
         root: XML root element
         file_list: List of file names to match
+        sha256_filter: Optional SHA256 hash to filter entries (case-insensitive)
 
     Returns:
         List of matching data elements
@@ -198,6 +207,11 @@ def get_all_entries_for_files(root, file_list):
     for data_elem in root.findall("data"):
         file_name = data_elem.get("file")
         if file_name in file_list:
+            # If SHA256 filter is specified, check if it matches
+            if sha256_filter:
+                entry_hash = data_elem.get("hash", "").lower()
+                if entry_hash != sha256_filter.lower():
+                    continue
             entries.append(data_elem)
     return entries
 
@@ -983,6 +997,7 @@ def main():
     symboldir = args.symboldir
     json_path = args.json
     debug = args.debug
+    sha256_filter = args.sha256
 
     # Validate paths
     if not os.path.exists(xml_path):
@@ -999,6 +1014,9 @@ def main():
     print(f"  Files to process: {file_list}")
     print(f"  Symbols to extract: {len(symbols_list)}")
 
+    if sha256_filter:
+        print(f"  SHA256 filter: {sha256_filter}")
+
     if debug:
         print(f"  Debug mode: enabled")
 
@@ -1012,7 +1030,7 @@ def main():
     print(f"  Found {len(existing_fields)} existing fields sections")
 
     # Get all data entries for the specified files
-    data_entries = get_all_entries_for_files(root, file_list)
+    data_entries = get_all_entries_for_files(root, file_list, sha256_filter)
     print(f"  Found {len(data_entries)} data entries to process")
 
     if not data_entries:
