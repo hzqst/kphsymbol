@@ -112,11 +112,7 @@
             },
             {
                 "name" : "MmSectionControlArea",
-                "symbol" : "_SECTION->u1.ControlArea"
-            },
-            {
-                "name" : "MmSectionSegment",
-                "symbol" : "_SECTION_OBJECT->Segment,_SEGMENT->ControlArea"
+                "symbol" : "_SECTION->u1.ControlArea,_SECTION_OBJECT->Segment"
             },
             {
                 "name" : "MmControlAreaListHead",
