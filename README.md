@@ -13,7 +13,7 @@ curl -O https://raw.githubusercontent.com/winsiderss/systeminformer/master/kphli
 ```
 
 ```powershell
-powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/winsiderss/systeminformer/master/kphlib/kphdyn.xml' -OutFile kphdyn.xml
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/winsiderss/systeminformer/master/kphlib/kphdyn.xml' -OutFile kphdyn.xml"
 ```
 
 ### Requirements
