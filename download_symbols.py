@@ -191,29 +191,35 @@ def build_pe_url(entry):
 def download_file(url, target_path):
     """
     Download a file from URL to target path.
-    
+
+    Downloads the entire file content to memory first, then writes to disk
+    to prevent corrupted files from incomplete downloads.
+
     Args:
         url: Download URL
         target_path: Local path to save the file
-        
+
     Returns:
         True if successful, False otherwise
     """
     try:
         print(f"  Downloading: {url}")
-        response = requests.get(url, stream=True, timeout=60)
+        response = requests.get(url, timeout=60)
         response.raise_for_status()
-        
+
+        # Cache content in memory first
+        content = response.content
+
         # Ensure parent directory exists
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
-        
+
+        # Write to file only after full download completed
         with open(target_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
+            f.write(content)
+
         print(f"  Saved to: {target_path}")
         return True
-        
+
     except requests.exceptions.RequestException as e:
         print(f"  Download failed: {e}")
         return False
