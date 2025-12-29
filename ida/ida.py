@@ -411,9 +411,20 @@ def export_function_info(func_name, func_ea, disasm_code, output_path, pseudocod
     if pseudocode:
         data["procedure"] = pseudocode
 
-    # 使用 PyYAML 输出，default_style='|' 使多行字符串使用 literal block 格式
+    # 自定义 Dumper 使多行字符串使用 literal block 格式 (|)
+    class LiteralDumper(yaml.SafeDumper):
+        pass
+
+    def literal_str_representer(dumper, data):
+        if '\n' in data:
+            # 多行字符串使用 literal block style
+            return dumper.represent_scalar('tag:yaml.org,2002:str', data, style='|')
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+    LiteralDumper.add_representer(str, literal_str_representer)
+
     with open(output_path, "w", encoding="utf-8") as fp:
-        yaml.dump(data, fp, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        yaml.dump(data, fp, Dumper=LiteralDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     print(f"[+] Exported to: {output_path}")
 
