@@ -292,10 +292,12 @@ python upload_server.py -symboldir="C:/Symbols" [-port=8000]
 
 ```bash
 export KPHTOOLS_SYMBOLDIR="C:/Symbols"
+export KPHTOOLS_SERVER_PORT=8000
 ```
 
 ```bash
 set KPHTOOLS_SYMBOLDIR=C:/Symbols
+set KPHTOOLS_SERVER_PORT=8000
 ```
 
 ### API: Checks if your ntoskrnl already exists:
