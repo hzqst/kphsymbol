@@ -6,27 +6,30 @@ Updates field offsets in kphdyn.xml by parsing PDB files using llvm-pdbutil.
 
 Usage:
     # Normal mode: Update symbol offsets from PDB files
-    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -json kphdyn.json
-    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -json kphdyn.json -sha256 <hash>
-    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -json kphdyn.json -pdbutil /path/to/llvm-pdbutil
-    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -json kphdyn.json -outxml kphdyn_updated.xml
+    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -yaml kphdyn.yaml
+    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -yaml kphdyn.yaml -sha256 <hash>
+    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -yaml kphdyn.yaml -pdbutil /path/to/llvm-pdbutil
+    python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -yaml kphdyn.yaml -outxml kphdyn_updated.xml
 
     # Syncfile mode: Sync PE files from symbol directory to XML entries
     python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -syncfile
     python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -syncfile -fast
     python update_symbols.py -xml kphdyn.xml -symboldir C:/Symbols -syncfile -outxml kphdyn_updated.xml
 
-JSON Config Format:
-    [
-        {
-            "file": ["ntoskrnl.exe", "ntkrla57.exe"],
-            "symbols": [
-                {"name": "EpObjectTable", "struct_offset": "_EPROCESS->ObjectTable", "type": "uint16"},
-                {"name": "PspNotify", "var_offset": "PspCreateProcessNotifyRoutine", "type": "uint32"},
-                {"name": "ExRefCallback", "fn_offset": "ExReferenceCallBackBlock", "type": "uint32"}
-            ]
-        }
-    ]
+YAML Config Format:
+    - file:
+        - ntoskrnl.exe
+        - ntkrla57.exe
+      symbols:
+        - name: EpObjectTable
+          struct_offset: "_EPROCESS->ObjectTable"
+          type: uint16
+        - name: PspNotify
+          var_offset: PspCreateProcessNotifyRoutine
+          type: uint32
+        - name: ExRefCallback
+          fn_offset: ExReferenceCallBackBlock
+          type: uint32
 
 Symbol Types:
     - struct_offset: Structure member offset (e.g., "_EPROCESS->ObjectTable")
@@ -59,9 +62,9 @@ Syncfile Mode:
 Requirements:
     - llvm-pdbutil must be available in system PATH or specified via -pdbutil
     - pefile module required for -syncfile mode (pip install pefile)
+    - pyyaml module required for YAML config (pip install pyyaml)
 """
 
-import json
 import os
 import re
 import argparse
@@ -75,6 +78,12 @@ try:
     HAS_PEFILE = True
 except ImportError:
     HAS_PEFILE = False
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
 
 
 # XML header with copyright notice
@@ -105,8 +114,8 @@ def parse_args():
         help="Directory containing symbol files"
     )
     parser.add_argument(
-        "-json",
-        help="Path to the JSON config file (e.g., kphdyn.json). Required except in -syncfile mode"
+        "-yaml",
+        help="Path to the YAML config file (e.g., kphdyn.yaml). Required except in -syncfile mode"
     )
     parser.add_argument(
         "-debug",
@@ -142,33 +151,38 @@ def parse_args():
         parser.error("-xml cannot be empty")
     if not args.symboldir:
         parser.error("-symboldir cannot be empty")
-    if not args.syncfile and not args.json:
-        parser.error("-json is required when not using -syncfile mode")
+    if not args.syncfile and not args.yaml:
+        parser.error("-yaml is required when not using -syncfile mode")
 
     return args
 
 
-def load_json_config(json_path):
+def load_yaml_config(yaml_path):
     """
-    Load JSON configuration file.
+    Load YAML configuration file.
 
     Args:
-        json_path: Path to JSON file
+        yaml_path: Path to YAML file
 
     Returns:
         Tuple of (file_list, symbols_list)
         - file_list: List of file names to match (e.g., ["ntoskrnl.exe", "ntkrla57.exe"])
         - symbols_list: List of symbol dicts with "name" and "symbol" keys
     """
-    if not os.path.exists(json_path):
-        print(f"Error: JSON file not found: {json_path}")
+    if not HAS_YAML:
+        print("Error: PyYAML module is required")
+        print("Install it with: pip install pyyaml")
         sys.exit(1)
 
-    with open(json_path, "r", encoding="utf-8") as f:
-        config = json.load(f)
+    if not os.path.exists(yaml_path):
+        print(f"Error: YAML file not found: {yaml_path}")
+        sys.exit(1)
+
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
 
     if not isinstance(config, list) or len(config) == 0:
-        print("Error: JSON config must be a non-empty array")
+        print("Error: YAML config must be a non-empty array")
         sys.exit(1)
 
     # Use the first entry
@@ -178,11 +192,11 @@ def load_json_config(json_path):
     symbols_list = entry.get("symbols", [])
 
     if not file_list:
-        print("Error: JSON config missing 'file' array")
+        print("Error: YAML config missing 'file' array")
         sys.exit(1)
 
     if not symbols_list:
-        print("Error: JSON config missing 'symbols' array")
+        print("Error: YAML config missing 'symbols' array")
         sys.exit(1)
 
     # Validate symbols
@@ -1499,7 +1513,7 @@ def main():
         return
 
     # Normal mode: update symbols from PDB
-    json_path = args.json
+    yaml_path = args.yaml
     debug = args.debug
     sha256_filter = args.sha256
     pdbutil_path = args.pdbutil
@@ -1508,9 +1522,9 @@ def main():
         print(f"Error: llvm-pdbutil not found at: {pdbutil_path}")
         sys.exit(1)
 
-    # Load JSON config
-    print(f"Loading JSON config: {json_path}")
-    file_list, symbols_list = load_json_config(json_path)
+    # Load YAML config
+    print(f"Loading YAML config: {yaml_path}")
+    file_list, symbols_list = load_yaml_config(yaml_path)
     print(f"  Files to process: {file_list}")
     print(f"  Symbols to extract: {len(symbols_list)}")
 
