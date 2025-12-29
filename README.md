@@ -156,6 +156,10 @@ python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile -ou
 
 The syncfile mode scans the symbol directory for PE files (exe/dll/sys) and adds missing entries to the XML:
 
+```bash
+python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile -syncfile
+```
+
 **How it works:**
 
 1. Scans all PE files in the symbol directory (e.g., `C:/Symbols/amd64/ntoskrnl.exe.10.0.16299.551/ntoskrnl.exe`)
@@ -170,6 +174,10 @@ The syncfile mode scans the symbol directory for PE files (exe/dll/sys) and adds
 **Fast mode (`-fast`):**
 
 In normal syncfile mode, all PE files are parsed upfront. With `-fast` flag, PE parsing is deferred until an entry is confirmed to be missing, which can significantly speed up the process when most entries already exist.
+
+```bash
+python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile -syncfile -fast
+```
 
 **Expected symbol directory structure:**
 
