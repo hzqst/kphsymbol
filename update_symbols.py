@@ -920,15 +920,19 @@ def allocate_new_fields_id(existing_ids):
     """
     Allocate a new fields ID that doesn't conflict with existing ones.
 
+    Searches from 1 upwards to find the smallest available ID, preventing
+    ID explosion over time when entries are added and removed.
+
     Args:
-        existing_ids: Set of existing IDs (integers)
+        existing_ids: Set of existing IDs (integers) that are in use
 
     Returns:
         New ID (int)
     """
-    if not existing_ids:
-        return 1
-    return max(existing_ids) + 1
+    new_id = 1
+    while new_id in existing_ids:
+        new_id += 1
+    return new_id
 
 
 def create_fields_element(root, fields_id, offsets, symbols_list):
@@ -953,14 +957,45 @@ def create_fields_element(root, fields_id, offsets, symbols_list):
             field_elem.set("name", name)
 
 
-def remove_orphan_fields(root, referenced_ids):
+def collect_all_referenced_ids(root):
     """
-    Remove <fields> elements that are not referenced by any <data> entry.
+    Collect all fields IDs referenced by any <data> entry in the XML.
 
     Args:
         root: XML root element
-        referenced_ids: Set of fields IDs that are referenced
+
+    Returns:
+        Set of referenced fields IDs (integers)
     """
+    referenced_ids = set()
+    for data_elem in root.findall("data"):
+        text = data_elem.text
+        if text:
+            try:
+                fields_id = int(text.strip())
+                referenced_ids.add(fields_id)
+            except ValueError:
+                pass
+    return referenced_ids
+
+
+def remove_orphan_fields(root):
+    """
+    Remove <fields> elements that are not referenced by any <data> entry.
+
+    This function scans ALL <data> entries in the XML to determine which
+    fields are still in use, ensuring that fields referenced by entries
+    not processed in the current run (e.g., lxcore.sys) are preserved.
+
+    Args:
+        root: XML root element
+
+    Returns:
+        Number of fields elements removed
+    """
+    # Collect ALL referenced IDs from ALL data entries
+    referenced_ids = collect_all_referenced_ids(root)
+
     fields_to_remove = []
     for fields_elem in root.findall("fields"):
         fields_id = fields_elem.get("id")
@@ -1144,8 +1179,8 @@ def main():
     for fields_id, offsets in sorted(new_fields.items()):
         create_fields_element(root, fields_id, offsets, symbols_list)
 
-    # Remove orphan fields
-    removed_count = remove_orphan_fields(root, referenced_ids)
+    # Remove orphan fields (scans ALL data entries, not just processed ones)
+    removed_count = remove_orphan_fields(root)
     if removed_count > 0:
         print(f"\nRemoved {removed_count} orphan fields sections")
 
