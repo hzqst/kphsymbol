@@ -543,6 +543,23 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
                 pass
         
         self.send_json_response(200, "File existence checked", response_data)
+
+    def do_HEAD(self):
+        """Handle HEAD requests for health checks."""
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+
+        if path in ('/health', '/'):
+            # HEAD must not send a message body; only headers.
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+
+        self.send_response(404)
+        self.send_header('Content-Length', '0')
+        self.end_headers()
     
     def do_POST(self):
         """Handle POST requests to /upload."""
