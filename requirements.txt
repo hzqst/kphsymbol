@@ -1,3 +1,6 @@
 pefile
 requests
 signify
+openai
+anthropic
+PyYAML
