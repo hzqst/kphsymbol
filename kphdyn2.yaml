@@ -32,10 +32,12 @@
     - name: ObDecodeShift
       struct_offset: "_HANDLE_TABLE_ENTRY->ObjectPointerBits"
       type: uint16
+      bits: true
 
     - name: ObAttributesShift
       struct_offset: "_HANDLE_TABLE_ENTRY->Attributes"
       type: uint16
+      bits: true
 
     - name: AlpcCommunicationInfo
       struct_offset: "_ALPC_PORT->CommunicationInfo"

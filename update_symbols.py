@@ -38,11 +38,20 @@ YAML Config Format:
         - name: ExRefCallback
           fn_offset: ExReferenceCallBackBlock
           type: uint32
+        - name: ObDecodeShift
+          struct_offset: "_HANDLE_TABLE_ENTRY->ObjectPointerBits"
+          type: uint16
+          bits: true
 
 Symbol Types:
     - struct_offset: Structure member offset (e.g., "_EPROCESS->ObjectTable")
     - var_offset: Global variable offset (e.g., "PspCreateProcessNotifyRoutine")
     - fn_offset: Function offset (e.g., "ExReferenceCallBackBlock")
+
+Optional Symbol Fields:
+    - bits: true - For bitfield members, output offset in bits instead of bytes.
+                   The bit offset is calculated as: (byte_offset * 8) + bitfield_bit_offset
+                   This is useful for bitfield members like ObjectPointerBits.
 
 Data Types:
     - type: "uint16" - Output as 4-digit hex (0x0000-0xffff), max value 0xffff
@@ -442,7 +451,7 @@ def run_llvm_pdbutil(pdb_path, pdbutil_path=None):
         return None
 
 
-def parse_llvm_pdbutil_output(output, struct_name, member_name, debug=False):
+def parse_llvm_pdbutil_output(output, struct_name, member_name, need_bits=False, debug=False):
     """
     Parse llvm-pdbutil dump output to find member offset.
 
@@ -453,10 +462,12 @@ def parse_llvm_pdbutil_output(output, struct_name, member_name, debug=False):
         output: llvm-pdbutil output string
         struct_name: Structure name to find (e.g., _EPROCESS)
         member_name: Member name to find offset for (e.g., Protection or u1.State)
+        need_bits: If True, return offset in bits (for bitfield members)
         debug: Enable debug logging
 
     Returns:
-        Offset as integer, or None if not found
+        If need_bits is False: Offset in bytes as integer, or None if not found
+        If need_bits is True: Offset in bits as integer, or None if not found
     """
     lines = output.split('\n')
 
@@ -491,6 +502,8 @@ def parse_llvm_pdbutil_output(output, struct_name, member_name, debug=False):
             if nested_offset is not None:
                 if debug:
                     print(f"    [DEBUG] Found nested member as direct member: offset={nested_offset}")
+                if need_bits:
+                    return nested_offset * 8
                 return nested_offset
             if debug:
                 print(f"    [DEBUG] Nested member '{nested_member}' not found as direct member")
@@ -509,9 +522,14 @@ def parse_llvm_pdbutil_output(output, struct_name, member_name, debug=False):
         if debug:
             print(f"    [DEBUG] Nested offset: {nested_offset}, total: {parent_offset + nested_offset}")
 
-        return parent_offset + nested_offset
+        total_offset = parent_offset + nested_offset
+        if need_bits:
+            return total_offset * 8
+        return total_offset
 
-    # Simple member (no nesting)
+    # Simple member (no nesting) - use bitfield-aware function if need_bits is True
+    if need_bits:
+        return find_member_offset_and_bitfield(lines, struct_name, member_name, need_bits=True, debug=debug)
     return find_member_offset(lines, struct_name, member_name, debug)
 
 
@@ -723,6 +741,171 @@ def find_member_type(lines, struct_name, member_name, debug=False):
     if debug:
         print(f"    [DEBUG] find_member_type: Type definition for {type_id} not found")
     return None, None
+
+
+def get_bitfield_bit_offset(lines, type_id, debug=False):
+    """
+    Get the bit offset from an LF_BITFIELD type.
+
+    Args:
+        lines: List of output lines
+        type_id: Type ID (e.g., 0x2AE3)
+        debug: Enable debug logging
+
+    Returns:
+        Bit offset as integer, or None if not a bitfield or not found
+    """
+    for i, line in enumerate(lines):
+        if f"{type_id} | LF_BITFIELD" in line:
+            # Look at the next line for bit offset
+            if i + 1 < len(lines):
+                next_line = lines[i + 1]
+                bit_offset_match = re.search(r'bit offset\s*=\s*(\d+)', next_line)
+                if bit_offset_match:
+                    bit_offset = int(bit_offset_match.group(1))
+                    if debug:
+                        print(f"    [DEBUG] Found LF_BITFIELD {type_id} with bit offset = {bit_offset}")
+                    return bit_offset
+            break
+    return None
+
+
+def find_member_offset_and_bitfield(lines, struct_name, member_name, need_bits=False, debug=False):
+    """
+    Find the offset of a member within a structure, optionally with bitfield bit offset.
+
+    Args:
+        lines: List of output lines
+        struct_name: Structure name
+        member_name: Member name
+        need_bits: If True, also calculate bitfield offset and return total bits offset
+        debug: Enable debug logging
+
+    Returns:
+        If need_bits is False: Offset in bytes as integer, or None if not found
+        If need_bits is True: Offset in bits as integer (byte_offset * 8 + bit_offset), or None if not found
+    """
+    # Step 1: Find the structure definition and get its field list ID
+    field_list_id = None
+
+    # Try LF_STRUCTURE or LF_STRUCTURE2 first
+    for i, line in enumerate(lines):
+        if ("LF_STRUCTURE " in line or "LF_STRUCTURE2 " in line) and f"`{struct_name}`" in line:
+            if debug:
+                lf_type = "LF_STRUCTURE2" if "LF_STRUCTURE2" in line else "LF_STRUCTURE"
+                print(f"    [DEBUG] Found {lf_type} for '{struct_name}' at line {i}")
+            for j in range(i + 1, min(i + 10, len(lines))):
+                next_line = lines[j]
+                if "forward ref" in next_line:
+                    if debug:
+                        print(f"    [DEBUG] Skipping forward reference")
+                    break
+                field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
+                if field_list_match:
+                    field_list_id = field_list_match.group(1)
+                    if debug:
+                        print(f"    [DEBUG] Found field list ID: {field_list_id}")
+                    break
+
+            if field_list_id:
+                break
+
+    # Also check for LF_UNION or LF_UNION2
+    if not field_list_id:
+        for i, line in enumerate(lines):
+            if ("LF_UNION " in line or "LF_UNION2 " in line) and f"`{struct_name}`" in line:
+                if debug:
+                    lf_type = "LF_UNION2" if "LF_UNION2" in line else "LF_UNION"
+                    print(f"    [DEBUG] Found {lf_type} for '{struct_name}' at line {i}")
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    next_line = lines[j]
+                    if "forward ref" in next_line:
+                        if debug:
+                            print(f"    [DEBUG] Skipping forward reference")
+                        break
+                    field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
+                    if field_list_match:
+                        field_list_id = field_list_match.group(1)
+                        if debug:
+                            print(f"    [DEBUG] Found field list ID: {field_list_id}")
+                        break
+
+                if field_list_id:
+                    break
+
+    # Try LF_CLASS or LF_CLASS2 as fallback
+    if not field_list_id:
+        for i, line in enumerate(lines):
+            if ("LF_CLASS " in line or "LF_CLASS2 " in line) and f"`{struct_name}`" in line:
+                if debug:
+                    lf_type = "LF_CLASS2" if "LF_CLASS2" in line else "LF_CLASS"
+                    print(f"    [DEBUG] Found {lf_type} for '{struct_name}' at line {i}")
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    next_line = lines[j]
+                    if "forward ref" in next_line:
+                        if debug:
+                            print(f"    [DEBUG] Skipping forward reference")
+                        break
+                    field_list_match = re.search(r'field list:\s*(0x[0-9a-fA-F]+)', next_line)
+                    if field_list_match:
+                        field_list_id = field_list_match.group(1)
+                        if debug:
+                            print(f"    [DEBUG] Found field list ID: {field_list_id}")
+                        break
+
+                if field_list_id:
+                    break
+
+    if not field_list_id:
+        if debug:
+            print(f"    [DEBUG] No field list ID found for '{struct_name}'")
+        return None
+
+    # Step 2: Find the LF_FIELDLIST with this ID and search for the member
+    in_field_list = False
+
+    for line in lines:
+        if f"{field_list_id} | LF_FIELDLIST" in line:
+            in_field_list = True
+            if debug:
+                print(f"    [DEBUG] Entered field list {field_list_id}")
+            continue
+
+        if in_field_list and re.match(r'\s*0x[0-9a-fA-F]+\s*\|\s*LF_', line):
+            in_field_list = False
+            continue
+
+        if in_field_list:
+            # Match LF_MEMBER with name, Type, and offset
+            match = re.search(
+                rf'LF_MEMBER\s*\[name\s*=\s*`{re.escape(member_name)}`.*Type\s*=\s*(0x[0-9a-fA-F]+).*offset\s*=\s*(\d+)',
+                line
+            )
+            if match:
+                type_id = match.group(1)
+                byte_offset = int(match.group(2))
+                if debug:
+                    print(f"    [DEBUG] Found member '{member_name}' with Type={type_id}, byte offset={byte_offset}")
+
+                if not need_bits:
+                    return byte_offset
+
+                # Check if the type is LF_BITFIELD
+                bit_offset = get_bitfield_bit_offset(lines, type_id, debug)
+                if bit_offset is not None:
+                    total_bits = byte_offset * 8 + bit_offset
+                    if debug:
+                        print(f"    [DEBUG] Bitfield: byte_offset={byte_offset}, bit_offset={bit_offset}, total_bits={total_bits}")
+                    return total_bits
+                else:
+                    # Not a bitfield, just return byte offset converted to bits
+                    if debug:
+                        print(f"    [DEBUG] Not a bitfield, returning byte offset * 8 = {byte_offset * 8}")
+                    return byte_offset * 8
+
+    if debug:
+        print(f"    [DEBUG] Member '{member_name}' not found in field list {field_list_id}")
+    return None
 
 
 def find_member_offset_by_type_id(lines, type_id, member_name, debug=False):
@@ -953,20 +1136,22 @@ def parse_pdb_all_symbols(pdb_path, symbols_list, pdbutil_path=None, debug=False
         if "struct_offset" in sym:
             # Handle structure member offset
             symbol_str = sym["struct_offset"]
+            need_bits = sym.get("bits", False)
 
             # Parse symbol with fallback support
             alternatives = parse_symbol_with_fallback(symbol_str)
 
             if debug:
+                bits_str = " (bits mode)" if need_bits else ""
                 if len(alternatives) > 1:
-                    print(f"    [DEBUG] Parsing struct_offset: {symbol_str} (with {len(alternatives)} alternatives)")
+                    print(f"    [DEBUG] Parsing struct_offset: {symbol_str} (with {len(alternatives)} alternatives){bits_str}")
                 else:
                     struct_name, member_name = alternatives[0]
-                    print(f"    [DEBUG] Parsing struct_offset: {symbol_str} -> {struct_name}->{member_name}")
+                    print(f"    [DEBUG] Parsing struct_offset: {symbol_str} -> {struct_name}->{member_name}{bits_str}")
 
             used_alternative = None
             for struct_name, member_name in alternatives:
-                offset = parse_llvm_pdbutil_output(types_output, struct_name, member_name, debug)
+                offset = parse_llvm_pdbutil_output(types_output, struct_name, member_name, need_bits=need_bits, debug=debug)
                 if offset is not None:
                     used_alternative = f"{struct_name}->{member_name}"
                     break
