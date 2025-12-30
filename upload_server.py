@@ -674,10 +674,10 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         """Override to customize log format."""
-        sys.stderr.write("%s - - [%s] %s\n" %
-                        (self.address_string(),
-                         self.log_date_time_string(),
-                         format % args))
+        #sys.stderr.write("%s - - [%s] %s\n" %
+        #                (self.address_string(),
+        #                 self.log_date_time_string(),
+        #                 format % args))
 
 
 def main():
