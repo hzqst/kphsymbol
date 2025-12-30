@@ -710,12 +710,11 @@ def main():
         with socketserver.TCPServer(("", port), handler_factory) as httpd:
             print(f"Server started. Press Ctrl+C to stop.")
             httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\nServer stopped.")
+    # except KeyboardInterrupt:
+    #    print("\nServer stopped.")
     except OSError as e:
         print(f"Error: Failed to start server: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
