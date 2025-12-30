@@ -157,7 +157,7 @@ python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile -ou
 The syncfile mode scans the symbol directory for PE files (exe/dll/sys) and adds missing entries to the XML:
 
 ```bash
-python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile -syncfile
+python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile
 ```
 
 **How it works:**
@@ -209,29 +209,9 @@ Scanning symbol directory: C:/Symbols
 Summary: 2 added, 3069 skipped, 0 failed
 ```
 
-### Configuration (kphdyn.json)
+### Configuration (kphdyn.yaml)
 
-The JSON config file specifies which files to process and which symbols to extract:
-
-```json
-[
-    {
-        "file" : [ "ntoskrnl.exe", "ntkrla57.exe" ],
-        "symbols": [
-            {
-                "name" : "EpObjectTable",
-                "struct_offset" : "_EPROCESS->ObjectTable",
-                "type" : "uint16"
-            },
-            {
-                "name" : "EpSectionObject",
-                "struct_offset" : "_EPROCESS->SectionObject",
-                "type" : "uint16"
-            }
-        ]
-    }
-]
-```
+The yaml config file specifies which files to process and which symbols to extract
 
 ### Output
 
