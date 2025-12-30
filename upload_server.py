@@ -449,10 +449,14 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
         
         response_json = json.dumps(response, ensure_ascii=False)
         
-        self.send_response(status_code)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(response_json.encode('utf-8'))
+        try:
+            self.send_response(status_code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(response_json.encode('utf-8'))
+        except (ConnectionResetError, BrokenPipeError):
+            # 客户端已断开连接，忽略
+            pass
     
     def send_error(self, code, message=None, explain=None):
         """
@@ -674,10 +678,11 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
     
     def log_message(self, format, *args):
         """Override to customize log format."""
-        #sys.stderr.write("%s - - [%s] %s\n" %
-        #                (self.address_string(),
-        #                 self.log_date_time_string(),
-        #                 format % args))
+        pass
+        sys.stderr.write("%s - - [%s] %s\n" %
+                        (self.address_string(),
+                         self.log_date_time_string(),
+                         format % args))
 
 
 def main():
