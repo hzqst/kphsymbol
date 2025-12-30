@@ -1030,7 +1030,83 @@ def run_llvm_pdbutil_publics(pdb_path, pdbutil_path=None):
         return None
 
 
-def parse_public_symbol_offset(output, symbol_name, symbol_type, debug=False):
+def run_llvm_pdbutil_sections(pdb_path, pdbutil_path=None):
+    """
+    Run llvm-pdbutil to dump section headers.
+
+    Args:
+        pdb_path: Path to the PDB file
+        pdbutil_path: Optional path to llvm-pdbutil executable
+
+    Returns:
+        Output string, or None on failure
+    """
+    if not os.path.exists(pdb_path):
+        return None
+
+    pdbutil_cmd = pdbutil_path if pdbutil_path else "llvm-pdbutil"
+
+    try:
+        result = subprocess.run(
+            [pdbutil_cmd, "dump", "-section-headers", pdb_path],
+            capture_output=True,
+            timeout=300
+        )
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode('utf-8', errors='replace')
+            print(f"  llvm-pdbutil (sections) failed: {stderr}")
+            return None
+
+        # Decode with error handling for non-UTF8 section names
+        return result.stdout.decode('utf-8', errors='replace')
+
+    except FileNotFoundError:
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"  Timeout while parsing PDB (sections): {pdb_path}")
+        return None
+    except Exception as e:
+        print(f"  Error running llvm-pdbutil (sections): {e}")
+        return None
+
+
+def parse_section_headers(output, debug=False):
+    """
+    Parse llvm-pdbutil section headers output to get section virtual addresses.
+
+    Args:
+        output: llvm-pdbutil section-headers dump output string
+        debug: Enable debug logging
+
+    Returns:
+        Dict mapping section number (1-based) to virtual address
+    """
+    sections = {}
+    lines = output.split('\n')
+
+    current_section = None
+    for line in lines:
+        # Match "SECTION HEADER #N"
+        section_match = re.search(r'SECTION HEADER #(\d+)', line)
+        if section_match:
+            current_section = int(section_match.group(1))
+            continue
+
+        # Match "virtual address" line (hex value followed by "virtual address")
+        if current_section is not None:
+            va_match = re.search(r'^\s*([0-9a-fA-F]+)\s+virtual address', line)
+            if va_match:
+                va = int(va_match.group(1), 16)
+                sections[current_section] = va
+                if debug:
+                    print(f"    [DEBUG] Section {current_section}: VA = 0x{va:08x}")
+                current_section = None
+
+    return sections
+
+
+def parse_public_symbol_offset(output, symbol_name, symbol_type, section_vas, debug=False):
     """
     Parse llvm-pdbutil publics dump output to find a symbol's RVA.
 
@@ -1038,6 +1114,7 @@ def parse_public_symbol_offset(output, symbol_name, symbol_type, debug=False):
         output: llvm-pdbutil publics dump output string
         symbol_name: Symbol name to find (e.g., PspCreateProcessNotifyRoutine)
         symbol_type: Type of symbol ('var' for variable, 'fn' for function)
+        section_vas: Dict mapping section number to virtual address
         debug: Enable debug logging
 
     Returns:
@@ -1047,9 +1124,10 @@ def parse_public_symbol_offset(output, symbol_name, symbol_type, debug=False):
 
     # Pattern for public symbols:
     # For variables: "     4 | S_PUB32 [size = 36] `PspCreateProcessNotifyRoutine`"
-    #                "           flags = none, addr = 0005:00123456"
+    #                "           flags = none, addr = 0026:1068896"
     # For functions: "     4 | S_PUB32 [size = 44] `ExReferenceCallBackBlock`"
-    #                "           flags = function, addr = 0001:00123456"
+    #                "           flags = function, addr = 0008:123456"
+    # Note: segment and offset are in decimal format
 
     expected_flags = "function" if symbol_type == "fn" else "none"
 
@@ -1074,16 +1152,25 @@ def parse_public_symbol_offset(output, symbol_name, symbol_type, debug=False):
                             print(f"    [DEBUG] Skipping: flags={actual_flags}, expected={expected_flags}")
                         continue
 
-                # Extract address (segment:offset format)
-                addr_match = re.search(r'addr\s*=\s*([0-9a-fA-F]+):([0-9a-fA-F]+)', next_line)
+                # Extract address (segment:offset format, both in decimal)
+                addr_match = re.search(r'addr\s*=\s*(\d+):(\d+)', next_line)
                 if addr_match:
-                    segment = int(addr_match.group(1), 16)
-                    offset = int(addr_match.group(2), 16)
+                    segment = int(addr_match.group(1), 10)
+                    offset = int(addr_match.group(2), 10)
                     if debug:
-                        print(f"    [DEBUG] Found addr: segment={segment:04x}, offset={offset:08x}")
-                    # Return the offset (RVA calculation would need section info)
-                    # For now, just return the offset part
-                    return offset
+                        print(f"    [DEBUG] Found addr: segment={segment}, offset={offset} (0x{offset:x})")
+
+                    # Calculate RVA: section VA + offset within section
+                    if segment in section_vas:
+                        section_va = section_vas[segment]
+                        rva = section_va + offset
+                        if debug:
+                            print(f"    [DEBUG] RVA = section_va(0x{section_va:x}) + offset(0x{offset:x}) = 0x{rva:x}")
+                        return rva
+                    else:
+                        if debug:
+                            print(f"    [DEBUG] Section {segment} not found in section_vas")
+                        return None
 
     if debug:
         print(f"    [DEBUG] Symbol '{symbol_name}' not found in publics")
@@ -1115,6 +1202,7 @@ def parse_pdb_all_symbols(pdb_path, symbols_list, pdbutil_path=None, debug=False
 
     types_output = None
     publics_output = None
+    section_vas = None
 
     if need_types:
         types_output = run_llvm_pdbutil(pdb_path, pdbutil_path)
@@ -1125,6 +1213,12 @@ def parse_pdb_all_symbols(pdb_path, symbols_list, pdbutil_path=None, debug=False
         publics_output = run_llvm_pdbutil_publics(pdb_path, pdbutil_path)
         if publics_output is None:
             return None
+
+        # Get section headers for RVA calculation
+        sections_output = run_llvm_pdbutil_sections(pdb_path, pdbutil_path)
+        if sections_output is None:
+            return None
+        section_vas = parse_section_headers(sections_output, debug)
 
     offsets = {}
     for sym in symbols_list:
@@ -1178,7 +1272,7 @@ def parse_pdb_all_symbols(pdb_path, symbols_list, pdbutil_path=None, debug=False
             if debug:
                 print(f"    [DEBUG] Parsing var_offset: {symbol_name}")
 
-            offset = parse_public_symbol_offset(publics_output, symbol_name, "var", debug)
+            offset = parse_public_symbol_offset(publics_output, symbol_name, "var", section_vas, debug)
 
             if offset is None:
                 print(f"  Warning: var_offset not found: {symbol_name}, using {max_value:#x}")
@@ -1198,7 +1292,7 @@ def parse_pdb_all_symbols(pdb_path, symbols_list, pdbutil_path=None, debug=False
             if debug:
                 print(f"    [DEBUG] Parsing fn_offset: {symbol_name}")
 
-            offset = parse_public_symbol_offset(publics_output, symbol_name, "fn", debug)
+            offset = parse_public_symbol_offset(publics_output, symbol_name, "fn", section_vas, debug)
 
             if offset is None:
                 print(f"  Warning: fn_offset not found: {symbol_name}, using {max_value:#x}")
