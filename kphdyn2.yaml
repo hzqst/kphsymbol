@@ -136,6 +136,14 @@
       struct_offset: "_KPROCESS->DirectoryTableBase"
       type: uint16
 
+    - name: KtStackBase
+      struct_offset: "_KTHREAD->StackBase"
+      type: uint16
+
+    - name: KtStackLimit
+      struct_offset: "_KTHREAD->StackLimit"
+      type: uint16
+
     - name: PspCreateProcessNotifyRoutine
       var_offset: PspCreateProcessNotifyRoutine
       type: uint32
