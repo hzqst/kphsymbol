@@ -427,9 +427,9 @@ exit 0
 ```shell
 @echo Generate SymbolMapping.yaml for missing-pdb ntoskrnl
 
-python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com"
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com" -ida="C:\Program Files\IDA Professional 9.0\ida64.exe"
 
-python reverse_symbols.py -symboldir="%WORKSPACE%\symbols"  -reverse=PspSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com"
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols"  -reverse=PspSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com" -ida="C:\Program Files\IDA Professional 9.0\ida64.exe"
 ```
 
 ```shell
