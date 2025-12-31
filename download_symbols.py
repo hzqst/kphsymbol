@@ -119,45 +119,52 @@ def parse_args():
 def parse_xml(xml_path, arch_filter=None, version_filter=None):
     """
     Parse the XML file and extract data entries.
-    
+
     Args:
         xml_path: Path to the XML file
         arch_filter: Optional architecture filter
         version_filter: Optional version prefix filter
-        
+
     Returns:
         List of dictionaries containing entry data
     """
     entries = []
-    
+
     tree = ET.parse(xml_path)
     root = tree.getroot()
-    
+
     for data_elem in root.findall("data"):
         arch = data_elem.get("arch")
         version = data_elem.get("version")
         file_name = data_elem.get("file")
         timestamp = data_elem.get("timestamp")
         size = data_elem.get("size")
-        
+        file_hash = data_elem.get("hash", "").lower()
+
         # Apply filters
         if arch_filter and arch != arch_filter:
             continue
         if version_filter and not version.startswith(version_filter):
             continue
-        
+
         # Skip lxcore.sys
         if file_name and file_name.lower() == "lxcore.sys":
             continue
-        
+
+        # Skip entries without hash
+        if not file_hash:
+            print(f"  Warning: Skipping entry without hash: {file_name} {version} ({arch})")
+            continue
+
         entries.append({
             "arch": arch,
             "version": version,
             "file": file_name,
             "timestamp": timestamp,
-            "size": size
+            "size": size,
+            "hash": file_hash
         })
-    
+
     return entries
 
 
@@ -228,32 +235,33 @@ def download_file(url, target_path):
 def download_pe(entry, symbol_dir):
     """
     Download a PE file based on the entry data.
-    
+
     Args:
-        entry: Dictionary with file info (file, version, timestamp, size, arch)
+        entry: Dictionary with file info (file, version, timestamp, size, arch, hash)
         symbol_dir: Base directory to save symbols
-        
+
     Returns:
         Path to the downloaded PE file, or None if failed
     """
     file_name = entry["file"]
     version = entry["version"]
     arch = entry["arch"]
-    
-    # Build target path: {symboldir}/{arch}/{file}.{version}/{file}
-    target_dir = os.path.join(symbol_dir, arch, f"{file_name}.{version}")
+    file_hash = entry["hash"]
+
+    # Build target path: {symboldir}/{arch}/{file}.{version}/{hash}/{file}
+    target_dir = os.path.join(symbol_dir, arch, f"{file_name}.{version}", file_hash)
     target_path = os.path.join(target_dir, file_name)
-    
+
     # Skip if already exists
     if os.path.exists(target_path):
         print(f"  PE file already exists: {target_path}")
         return target_path
-    
+
     url = build_pe_url(entry)
-    
+
     if download_file(url, target_path):
         return target_path
-    
+
     return None
 
 
@@ -361,8 +369,9 @@ def check_fast_skip(entry, symbol_dir):
     file_name = entry["file"].lower()
     version = entry["version"]
     arch = entry["arch"]
+    file_hash = entry["hash"]
 
-    target_dir = os.path.join(symbol_dir, arch, f"{entry['file']}.{version}")
+    target_dir = os.path.join(symbol_dir, arch, f"{entry['file']}.{version}", file_hash)
 
     if file_name == "ntoskrnl.exe":
         # Check for ntkrnlmp.pdb or ntoskrnl.pdb
@@ -393,34 +402,35 @@ def process_entry(entry, symbol_dir, fast_mode=False):
     file_name = entry["file"]
     version = entry["version"]
     arch = entry["arch"]
+    file_hash = entry["hash"]
 
-    print(f"\nProcessing: {file_name} {version} ({arch})")
+    print(f"\nProcessing: {file_name} {version} ({arch}) [{file_hash[:16]}...]")
 
     # Fast mode: skip if known PDB files already exist
     if fast_mode and check_fast_skip(entry, symbol_dir):
         print(f"  [Fast mode] PDB already exists, skipping")
         return True
-    
+
     # Step 1: Download PE file
     pe_path = download_pe(entry, symbol_dir)
     if not pe_path:
         print(f"  Failed to download PE file")
         return False
-    
+
     # Step 2: Parse PDB info from PE
     pdb_info = parse_pdb_info(pe_path)
     if not pdb_info:
         print(f"  Failed to parse PDB info from PE")
         return False
-    
+
     print(f"  PDB: {pdb_info['pdb_name']} (Signature: {pdb_info['signature']})")
-    
+
     # Step 3: Download PDB file to same directory as PE
     target_dir = os.path.dirname(pe_path)
     if not download_pdb(pdb_info, target_dir):
         print(f"  Failed to download PDB file")
         return False
-    
+
     print(f"  Success!")
     return True
 

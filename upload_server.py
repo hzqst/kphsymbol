@@ -86,7 +86,7 @@ FILEVERSION_PATTERN = re.compile(
 )
 
 
-def validate_exists_params(arch, filename, fileversion):
+def validate_exists_params(arch, filename, fileversion, sha256):
     """
     Validate parameters for /exists endpoint.
 
@@ -94,6 +94,7 @@ def validate_exists_params(arch, filename, fileversion):
         arch: Architecture string
         filename: Filename string
         fileversion: File version string
+        sha256: SHA256 hash string (lowercase, 64 hex characters)
 
     Returns:
         Tuple of (is_valid: bool, error_message: str or None)
@@ -110,10 +111,14 @@ def validate_exists_params(arch, filename, fileversion):
     if not FILEVERSION_PATTERN.match(fileversion):
         return (False, "Invalid fileversion: must be in format X.X.X.X where X is 0-65535")
 
+    # Validate sha256 format: 64 lowercase hex characters
+    if len(sha256) != 64 or not all(c in '0123456789abcdef' for c in sha256.lower()):
+        return (False, "Invalid sha256: must be 64 lowercase hexadecimal characters")
+
     return (True, None)
 
 
-def check_file_exists(symboldir, arch, filename, fileversion):
+def check_file_exists(symboldir, arch, filename, fileversion, sha256):
     """
     Check if a file exists in the symbol directory.
 
@@ -122,6 +127,7 @@ def check_file_exists(symboldir, arch, filename, fileversion):
         arch: Architecture (x86/amd64/arm64)
         filename: Filename to check
         fileversion: File version string
+        sha256: SHA256 hash of the file (lowercase)
 
     Returns:
         Dictionary with file existence information:
@@ -129,18 +135,19 @@ def check_file_exists(symboldir, arch, filename, fileversion):
             'filename': str,
             'arch': str,
             'fileversion': str,
+            'sha256': str,
             'exists': bool,
             'path': str,
             'file_size': int (optional, only if file exists)
         }
     """
-    # Build file path: {symboldir}/{arch}/{filename}.{fileversion}/{filename}
-    target_dir = os.path.join(symboldir, arch, f"{filename}.{fileversion}")
+    # Build file path: {symboldir}/{arch}/{filename}.{fileversion}/{sha256}/{filename}
+    target_dir = os.path.join(symboldir, arch, f"{filename}.{fileversion}", sha256)
     target_path = os.path.join(target_dir, filename)
 
     # Build relative path (relative to symboldir) for response
-    # Format: {arch}/{filename}.{fileversion}/{filename}
-    relative_path = os.path.join(arch, f"{filename}.{fileversion}", filename)
+    # Format: {arch}/{filename}.{fileversion}/{sha256}/{filename}
+    relative_path = os.path.join(arch, f"{filename}.{fileversion}", sha256, filename)
     # Normalize path separators to forward slashes for consistency
     relative_path = relative_path.replace(os.sep, '/')
 
@@ -152,6 +159,7 @@ def check_file_exists(symboldir, arch, filename, fileversion):
         'filename': filename,
         'arch': arch,
         'fileversion': fileversion,
+        'sha256': sha256,
         'exists': file_exists,
         'path': relative_path
     }
@@ -396,48 +404,51 @@ def verify_signature(file_data):
 def save_file(file_data, file_name, file_version, arch, symboldir):
     """
     Save file to target directory.
-    
+
     Args:
         file_data: Bytes data of the file
         file_name: Original filename
         file_version: File version
         arch: Architecture (x86/amd64/arm64)
         symboldir: Base symbol directory
-        
+
     Returns:
-        Tuple of (success: bool, message: str, status_code: int)
+        Tuple of (success: bool, message: str, status_code: int, sha256: str or None)
     """
-    # Build target path: {symboldir}/{arch}/{FileName}.{FileVersion}/{FileName}
-    target_dir = os.path.join(symboldir, arch, f"{file_name}.{file_version}")
+    # Calculate SHA256 hash of the file
+    file_hash = hashlib.sha256(file_data).hexdigest().lower()
+
+    # Build target path: {symboldir}/{arch}/{FileName}.{FileVersion}/{sha256}/{FileName}
+    target_dir = os.path.join(symboldir, arch, f"{file_name}.{file_version}", file_hash)
     target_path = os.path.join(target_dir, file_name)
-    
+
     # Check if file already exists
     if os.path.exists(target_path):
-        # Compare file contents
+        # Compare file contents by hash (file path already includes hash, so it should match)
         with open(target_path, 'rb') as f:
             existing_data = f.read()
-        
-        existing_hash = hashlib.sha256(existing_data).hexdigest()
-        new_hash = hashlib.sha256(file_data).hexdigest()
-        
-        if existing_hash == new_hash:
-            return (True, "File already exists and is identical", 200)
+
+        existing_hash = hashlib.sha256(existing_data).hexdigest().lower()
+
+        if existing_hash == file_hash:
+            return (True, "File already exists and is identical", 200, file_hash)
         else:
-            return (False, "File already exists with different content", 409)
-    
+            # This should not happen since path includes hash, but handle it anyway
+            return (False, "File already exists with different content", 409, file_hash)
+
     # Create directory if needed
     try:
         os.makedirs(target_dir, exist_ok=True)
     except OSError as e:
-        return (False, f"Failed to create directory: {e}", 500)
-    
+        return (False, f"Failed to create directory: {e}", 500, file_hash)
+
     # Save file
     try:
         with open(target_path, 'wb') as f:
             f.write(file_data)
-        return (True, "File uploaded successfully", 200)
+        return (True, "File uploaded successfully", 200, file_hash)
     except OSError as e:
-        return (False, f"Failed to save file: {e}", 500)
+        return (False, f"Failed to save file: {e}", 500, file_hash)
 
 
 class UploadHandler(http.server.BaseHTTPRequestHandler):
@@ -526,20 +537,24 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
         filename = query_params.get('filename', [None])[0]
         arch = query_params.get('arch', [None])[0]
         fileversion = query_params.get('fileversion', [None])[0]
+        sha256 = query_params.get('sha256', [None])[0]
 
         # Validate required parameters
-        if not filename or not arch or not fileversion:
-            self.send_json_response(400, "Missing required parameters: filename, arch, and fileversion are required")
+        if not filename or not arch or not fileversion or not sha256:
+            self.send_json_response(400, "Missing required parameters: filename, arch, fileversion, and sha256 are required")
             return
 
+        # Normalize sha256 to lowercase
+        sha256 = sha256.lower()
+
         # Validate parameter values
-        is_valid, error_message = validate_exists_params(arch, filename, fileversion)
+        is_valid, error_message = validate_exists_params(arch, filename, fileversion, sha256)
         if not is_valid:
             self.send_json_response(400, error_message)
             return
 
         # Check file existence
-        response_data = check_file_exists(self.symboldir, arch, filename, fileversion)
+        response_data = check_file_exists(self.symboldir, arch, filename, fileversion, sha256)
 
         self.send_json_response(200, "File existence checked", response_data)
 
@@ -627,19 +642,20 @@ class UploadHandler(http.server.BaseHTTPRequestHandler):
             return
         
         # Save file
-        success, message, status_code = save_file(
+        success, message, status_code, file_hash = save_file(
             file_data,
             pe_info['file_name'],
             pe_info['file_version'],
             pe_info['arch'],
             self.symboldir
         )
-        
+
         if success:
             self.send_json_response(status_code, message, {
                 'file_name': pe_info['file_name'],
                 'file_version': pe_info['file_version'],
-                'arch': pe_info['arch']
+                'arch': pe_info['arch'],
+                'sha256': file_hash
             })
         else:
             self.send_json_response(status_code, message)

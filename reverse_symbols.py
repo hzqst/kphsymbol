@@ -5,6 +5,10 @@ Reverse Symbols Script for KPH Dynamic Data
 Scans symbol directory for PE files missing PDB, uses IDA and LLM to recover symbols
 by comparing with similar versions that have PDB files.
 
+Directory Structure:
+    {symboldir}/{arch}/{filename}.{version}/{sha256}/{files}
+    Example: symbols/amd64/ntoskrnl.exe.10.0.16299.551/68d5867b.../ntoskrnl.exe
+
 Usage:
     python reverse_symbols.py -symboldir=C:/Symbols -reverse=PsSetCreateProcessNotifyRoutine -provider=openai -api_key="YOUR_KEY"
 
@@ -137,18 +141,18 @@ def parse_version(version_str):
 
 def parse_file_path_info(file_path, symboldir):
     """
-    Extract arch, filename, version from file path.
+    Extract arch, filename, version, sha256 from file path.
 
     Args:
         file_path: Full path to PE file
         symboldir: Base symbol directory
 
     Returns:
-        Dict with 'arch', 'file', 'version' keys, or None if parsing fails
+        Dict with 'arch', 'file', 'version', 'sha256' keys, or None if parsing fails
 
     Example:
-        Input: "symbols/amd64/ntoskrnl.exe.10.0.16299.551/ntoskrnl.exe"
-        Output: {'arch': 'amd64', 'file': 'ntoskrnl.exe', 'version': '10.0.16299.551'}
+        Input: "symbols/amd64/ntoskrnl.exe.10.0.16299.551/68d5867b.../ntoskrnl.exe"
+        Output: {'arch': 'amd64', 'file': 'ntoskrnl.exe', 'version': '10.0.16299.551', 'sha256': '68d5867b...'}
     """
     # Normalize paths
     file_path = os.path.normpath(file_path)
@@ -162,12 +166,17 @@ def parse_file_path_info(file_path, symboldir):
 
     # Split into components
     parts = rel_path.replace("\\", "/").split("/")
-    if len(parts) < 3:
+    if len(parts) < 4:
         return None
 
     arch = parts[0]
     version_dir = parts[1]  # e.g., "ntoskrnl.exe.10.0.16299.551"
-    filename = parts[2]      # e.g., "ntoskrnl.exe"
+    sha256 = parts[2]       # e.g., "68d5867b5e66fce486c863c11cf69020658cadbbacbbda1e167766f236fefe78"
+    filename = parts[3]      # e.g., "ntoskrnl.exe"
+
+    # Validate sha256 format (64 lowercase hex characters)
+    if len(sha256) != 64 or not all(c in '0123456789abcdef' for c in sha256.lower()):
+        return None
 
     # Parse version from directory name
     # Format: filename.version (e.g., "ntoskrnl.exe.10.0.16299.551")
@@ -179,7 +188,8 @@ def parse_file_path_info(file_path, symboldir):
     return {
         "arch": arch,
         "file": filename,
-        "version": version
+        "version": version,
+        "sha256": sha256.lower()
     }
 
 
@@ -212,6 +222,8 @@ def scan_symbol_directory(symboldir):
 
     Returns:
         List of PE file paths
+
+    Directory structure: {symboldir}/{arch}/{filename}.{version}/{sha256}/{filename}
     """
     pe_files = []
     pe_extensions = {".exe", ".dll", ".sys"}
@@ -226,10 +238,19 @@ def scan_symbol_directory(symboldir):
             if not os.path.isdir(version_path):
                 continue
 
-            for file_name in os.listdir(version_path):
-                file_ext = os.path.splitext(file_name)[1].lower()
-                if file_ext in pe_extensions:
-                    pe_files.append(os.path.join(version_path, file_name))
+            for sha256_dir in os.listdir(version_path):
+                sha256_path = os.path.join(version_path, sha256_dir)
+                if not os.path.isdir(sha256_path):
+                    continue
+
+                # Validate sha256 format (64 hex characters)
+                if len(sha256_dir) != 64 or not all(c in '0123456789abcdef' for c in sha256_dir.lower()):
+                    continue
+
+                for file_name in os.listdir(sha256_path):
+                    file_ext = os.path.splitext(file_name)[1].lower()
+                    if file_ext in pe_extensions:
+                        pe_files.append(os.path.join(sha256_path, file_name))
 
     return pe_files
 
@@ -243,7 +264,7 @@ def build_pe_index(pe_files, symboldir):
         symboldir: Base symbol directory
 
     Returns:
-        Dict mapping (arch, filename) to list of (version_tuple, pe_path, has_pdb)
+        Dict mapping (arch, filename) to list of (version_tuple, pe_path, has_pdb, sha256)
     """
     index = {}
 
@@ -255,6 +276,7 @@ def build_pe_index(pe_files, symboldir):
         arch = info["arch"]
         filename = info["file"]
         version = info["version"]
+        sha256 = info["sha256"]
         version_tuple = parse_version(version)
 
         pe_dir = os.path.dirname(pe_path)
@@ -270,7 +292,8 @@ def build_pe_index(pe_files, symboldir):
             "path": pe_path,
             "has_pdb": has_pdb,
             "arch": arch,
-            "file": filename
+            "file": filename,
+            "sha256": sha256
         })
 
     # Sort each group by version
@@ -739,8 +762,9 @@ def main():
         filename = pe_info["file"]
         version = pe_info["version"]
         version_tuple = pe_info["version_tuple"]
+        sha256 = pe_info["sha256"]
 
-        print(f"\n[{i+1}/{len(missing_pdb)}] Processing {arch}/{filename} v{version}")
+        print(f"\n[{i+1}/{len(missing_pdb)}] Processing {arch}/{filename} v{version} [{sha256[:16]}...]")
 
         # Find reference PE
         reference = find_reference_pe(pe_index, arch, filename, version_tuple)
@@ -749,7 +773,7 @@ def main():
             skip_count += 1
             continue
 
-        print(f"  Reference version: {reference['version']}")
+        print(f"  Reference version: {reference['version']} [{reference['sha256'][:16]}...]")
 
         # Process this PE
         if process_pe(pe_info, reference, func_name, ida_path, provider, api_key, api_base, model, debug):
