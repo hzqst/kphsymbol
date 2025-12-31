@@ -1,9 +1,6 @@
 - file:
     - ntoskrnl.exe
     - ntkrla57.exe
-  missing_pdb_execute:
-    - python ida/ntoskrnl/PsCreateProcessNotifyRoutine.py
-    - python ida/ntoskrnl/PspCreateProcessNotifyRoutine.py
   symbols:
     - name: EgeGuid
       struct_offset: "_ETW_GUID_ENTRY->Guid"

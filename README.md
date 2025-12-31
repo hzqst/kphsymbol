@@ -67,10 +67,12 @@ set KPHTOOLS_SYMBOLDIR=C:/Symbols
 ### Expected downloads
 
 ```
-C:\Symbols\amd64\ntoskrnl.exe.10.0.10240.16393\ntoskrnl.exe
-C:\Symbols\amd64\ntoskrnl.exe.10.0.10240.16393\ntkrnlmp.pdb
+C:\Symbols\amd64\ntoskrnl.exe.10.0.10240.16393\{sha256}\ntoskrnl.exe
+C:\Symbols\amd64\ntoskrnl.exe.10.0.10240.16393\{sha256}\ntkrnlmp.pdb
 ...others
 ```
+
+Where `{sha256}` is the lowercase SHA256 hash of the PE file (e.g., `68d5867b5e66fce486c863c11cf69020658cadbbacbbda1e167766f236fefe78`).
 
 ## Update symbols in kphdyn.xml
 
@@ -86,13 +88,27 @@ Also supports **syncfile mode** to scan symbol directory and add missing entries
 ### Usage
 
 **Normal mode** - Update symbol offsets from PDB files:
+
 ```bash
-python update_symbols.py -xml="path/to/kphdyn.xml" -symboldir="C:/Symbols" -json="path/to/kphdyn.json"
+python update_symbols.py -xml="path/to/kphdyn.xml" -symboldir="C:/Symbols" -yaml="path/to/kphdyn.yaml"
 ```
 
 **Syncfile mode** - Scan symbol directory and add missing entries:
+
 ```bash
 python update_symbols.py -xml="path/to/kphdyn.xml" -symboldir="C:/Symbols" -syncfile
+```
+
+**Fixnull mode** - Fix null entries (fields ID = 0) using SymbolMapping.yaml:
+
+```bash
+python update_symbols.py -xml="path/to/kphdyn.xml" -symboldir="C:/Symbols" -fixnull
+```
+
+**Fixstruct mode** - Fix struct_offset fallback values from closest valid version:
+
+```bash
+python update_symbols.py -xml="path/to/kphdyn.xml" -symboldir="C:/Symbols" -fixstruct
 ```
 
 ### Optional Arguments
@@ -162,9 +178,9 @@ python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile
 
 **How it works:**
 
-1. Scans all PE files in the symbol directory (e.g., `C:/Symbols/amd64/ntoskrnl.exe.10.0.16299.551/ntoskrnl.exe`)
-2. Extracts metadata from file path: `arch`, `file`, `version`
-3. Checks if a matching `<data>` entry exists in XML (by arch + file + version)
+1. Scans all PE files in the symbol directory (e.g., `C:/Symbols/amd64/ntoskrnl.exe.10.0.16299.551/{sha256}/ntoskrnl.exe`)
+2. Extracts metadata from file path: `arch`, `file`, `version`, `sha256`
+3. Checks if a matching `<data>` entry exists in XML (by arch + file + version + sha256)
 4. If the entry doesn't exist:
    - Parses PE file to extract `hash` (SHA256), `timestamp`, and `size`
    - Finds the insertion position (after the closest smaller version)
@@ -185,15 +201,18 @@ python update_symbols.py -xml="kphdyn.xml" -symboldir="C:/Symbols" -syncfile -sy
 C:/Symbols/
 ├── amd64/
 │   ├── ntoskrnl.exe.10.0.16299.551/
-│   │   ├── ntoskrnl.exe
-│   │   └── ntkrnlmp.pdb
+│   │   └── 68d5867b5e66fce486c863c11cf69020658cadbbacbbda1e167766f236fefe78/
+│   │       ├── ntoskrnl.exe
+│   │       └── ntkrnlmp.pdb
 │   └── ntkrla57.exe.10.0.20348.4529/
-│       ├── ntkrla57.exe
-│       └── ntkrla57.pdb
+│       └── a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456/
+│           ├── ntkrla57.exe
+│           └── ntkrla57.pdb
 └── arm64/
     └── ntoskrnl.exe.10.0.16299.1004/
-        ├── ntoskrnl.exe
-        └── ntkrnlmp.pdb
+        └── f1e2d3c4b5a6978012345678901234567890fedcba1234567890fedcba123456/
+            ├── ntoskrnl.exe
+            └── ntkrnlmp.pdb
 ```
 
 **Output example:**
@@ -212,6 +231,17 @@ Summary: 2 added, 3069 skipped, 0 failed
 ### Configuration (kphdyn.yaml)
 
 The yaml config file specifies which files to process and which symbols to extract
+
+```yaml
+  symbols:
+    - name: EgeGuid
+      struct_offset: "_ETW_GUID_ENTRY->Guid"
+      type: uint16
+
+    - name: EpObjectTable
+      struct_offset: "_EPROCESS->ObjectTable"
+      type: uint16
+```
 
 ### Output
 
@@ -256,11 +286,11 @@ The server will:
 - Verify Authenticode signature (Signer must be "Microsoft Windows", Issuer must be "Microsoft Windows Production PCA 2011")
 - Extract OriginalFilename and FileVersion from FileResource
 - Determine architecture (x86/amd64/arm64) from PE header
-- Store files to: `{symboldir}/{arch}/{FileName}.{FileVersion}/{FileName}`
+- Store files to: `{symboldir}/{arch}/{FileName}.{FileVersion}/{FileSHA256}/{FileName}`
 
 Example:
 - If `-symboldir="C:/Symbols"`, `arch=amd64`, `FileName=ntoskrnl.exe`, `FileVersion=10.0.22621.741`
-- File will be stored at: `C:/Symbols/amd64/ntoskrnl.exe.10.0.22621.741/ntoskrnl.exe`
+- File will be stored at: `C:/Symbols/amd64/ntoskrnl.exe.10.0.22621.741/8025c442b39a5e8f0ac64045350f0f1128e24f313fa1e32784f9854334188df3/ntoskrnl.exe`
 
 ### Usage, [] for optional
 
@@ -302,10 +332,10 @@ Not found:
 curl -X POST -H "Content-Type: application/octet-stream" --data-binary "@C:/Windows/System32/ntoskrnl.exe" http://localhost:8000/upload
 ```
 
+* `Content-Type: application/octet-stream` is expected
 * File size limit: 20MB
 * If the target file already exists, it will not be overwritten
-* "application/octet-stream" is expected
-* Header "X-File-Compressed: gzip" supported, client should gzip the ntoskrnl payload before uploading.
+* Header "X-File-Compressed: gzip" supported. with this header given, client should gzip the ntoskrnl payload before uploading.
 
 ### API: Healthy Check
 
@@ -317,3 +347,51 @@ curl "http://localhost:8000/"
 ```
 {"status": "healthy"}
 ```
+
+## Reverse engineer symbols using IDA and LLM
+
+Reverse engineers symbols for PE files missing PDB by comparing with similar versions that have PDB files using IDA Pro and LLM (OpenAI or Anthropic).
+
+**Directory Structure:**
+
+- Works with: `{symboldir}/{arch}/{filename}.{version}/{sha256}/{files}`
+- Requires IDA Pro with `ida64.exe`
+
+### Basic Usage
+
+```bash
+python reverse_symbols.py -symboldir=C:/Symbols -reverse=PsSetCreateProcessNotifyRoutine -provider=openai -api_key="YOUR_KEY"
+```
+
+With custom model and API base:
+
+```bash
+python reverse_symbols.py -symboldir=C:/Symbols -reverse=PsSetCreateProcessNotifyRoutune \
+    -provider=openai -api_key="YOUR_KEY" -model="deepseek-chat" -api_base="https://api.deepseek.com"
+```
+
+### Command Arguments
+
+- `-symboldir`: Symbol directory containing PE files (required, or set `KPHTOOLS_SYMBOLDIR`)
+- `-reverse`: Function name to reverse engineer (required, e.g., `PsSetCreateProcessNotifyRoutine`)
+- `-provider`: LLM provider: `openai` or `anthropic` (default: `openai`)
+- `-api_key`: API key (or use `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` environment variable)
+- `-model`: LLM model name (optional)
+- `-api_base`: API base URL (optional, or use `OPENAI_API_BASE`/`ANTHROPIC_API_BASE`)
+- `-ida`: Path to `ida64.exe` (optional, searches PATH or uses `IDA64_PATH` environment variable)
+- `-debug`: Enable debug output
+
+### Processing Workflow
+
+For each PE file missing PDB:
+
+1. Find the closest lower version with PDB as reference
+2. Run IDA disasm on target PE (missing PDB)
+3. Run IDA disasm on reference PE (with PDB)
+4. Call `generate_mapping.py` to create symbol mappings via LLM
+5. Run IDA `symbol_remap` to apply mappings
+
+### Tool Requirements
+
+- IDA Pro with `ida64.exe`
+- Python packages: `pyyaml`, `openai` or `anthropic`
