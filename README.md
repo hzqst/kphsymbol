@@ -395,3 +395,55 @@ For each PE file missing PDB:
 
 - IDA Pro with `ida64.exe`
 - Python packages: `pyyaml`, `openai` or `anthropic`
+
+## Reference workflow in jenkins (Windows)
+
+```bash
+@echo Get latest kphdyn.xml
+
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/winsiderss/systeminformer/master/kphlib/kphdyn.xml' -OutFile kphdyn.official.xml"
+
+copy kphdyn.official.xml kphdyn.xml /y
+```
+
+```bash
+@echo Sync unmanaged ntoskrnl to kphdyn.xml
+
+python update_symbols.py -xml="%WORKSPACE%\kphdyn.xml" -symboldir="%WORKSPACE%\symbols" -syncfile -fast
+```
+
+```bash
+@echo Download ntoskrnl via kphdyn.xml
+
+pip install -r requirements.txt
+
+python download_symbols.py -xml="%WORKSPACE%\kphdyn.xml" -symboldir="%WORKSPACE%\symbols" -fast
+
+exit 0
+```
+
+```bash
+@echo Generate SymbolMapping.yaml for missing-pdb ntoskrnl
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols"  -reverse=PspSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com"
+```
+
+```bash
+@echo Generate strut function and variable RVA via ntoskrnl pdb
+
+python update_symbols.py -xml kphdyn.xml -symboldir "%WORKSPACE%\symbols" -yaml kphdyn.yaml
+```
+
+```bash
+@echo Fix function and variable RVA via SymbolMapping.yaml
+
+python update_symbols.py -xml kphdyn.xml -symboldir "%WORKSPACE%\symbols" -yaml kphdyn.yaml -fixnull
+```
+
+```bash
+@echo Fix struct offset
+
+python update_symbols.py -xml kphdyn.xml -symboldir "%WORKSPACE%\symbols" -yaml kphdyn.yaml -fixstruct
+```
