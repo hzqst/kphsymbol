@@ -132,6 +132,15 @@
       struct_offset: "_EPROCESS->Protection"
       type: uint16
 
+    - name: EpCookie
+      struct_offset: "_EPROCESS->Cookie"
+      type: uint16
+
+    - name: EpBreakOnTermination
+      struct_offset: "_EPROCESS->BreakOnTermination"
+      type: uint16
+      bits: true
+
     - name: KpDirectoryTableBase
       struct_offset: "_KPROCESS->DirectoryTableBase"
       type: uint16
