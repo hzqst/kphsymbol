@@ -88,6 +88,22 @@
       struct_offset: "_ALPC_PORT->u1.State"
       type: uint16
 
+    - name: KtInitialStack
+      struct_offset: "_KTHREAD->InitialStack"
+      type: uint16
+
+    - name: KtStackLimit
+      struct_offset: "_KTHREAD->StackLimit"
+      type: uint16
+
+    - name: KtStackBase
+      struct_offset: "_KTHREAD->StackBase"
+      type: uint16
+
+    - name: KtKernelStack
+      struct_offset: "_KTHREAD->KernelStack"
+      type: uint16
+
     - name: KtReadOperationCount
       struct_offset: "_KTHREAD->ReadOperationCount"
       type: uint16
