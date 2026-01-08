@@ -259,20 +259,6 @@ For each `<data>` entry matching the specified files, the script:
 </fields>
 ```
 
-## Add new ntoskrnl entry to kphdyn.xml with known MD5/SHA256 (Deprecated)
-
-```
-python add_ntoskrnl_from_virustotal.py -xml="path/to/kphdyn.xml" -md5=9F4D868D410F6D68D0A73C9139D754B0 -apikey="{YourVirusTotalAPIKey}"
-```
-
-A new entry :
-
-`<data arch="amd64" version="10.0.26100.5067" file="ntoskrnl.exe" hash="eef546d98c2ee3c006756c47bad46c62157d6f43bc8204e2679d3895efbc33c2" timestamp="0x66ffa119" size="0x0144f000">25</data>`
-
-will be added to `kphdyn.xml` if file with given has was found on virustotal.
-
-* Get a valid api key from https://www.virustotal.com/
-
 ## HTTP server for collecting ntoskrnl.exe 
 
 HTTP server that handles file uploads, validates PE files and digital signatures, and stores files in the symbol directory structure.
