@@ -172,3 +172,7 @@
     - name: ExDereferenceCallBackBlock
       fn_offset: ExDereferenceCallBackBlock
       type: uint32
+
+    - name: PspLoadImageNotifyRoutine
+      var_offset: PspLoadImageNotifyRoutine
+      type: uint32
