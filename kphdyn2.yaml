@@ -165,14 +165,18 @@
       var_offset: PspCreateProcessNotifyRoutine
       type: uint32
 
+    - name: PspLoadImageNotifyRoutine
+      var_offset: PspLoadImageNotifyRoutine
+      type: uint32
+
+    - name: PspCreateThreadNotifyRoutine
+      var_offset: PspCreateThreadNotifyRoutine
+      type: uint32
+
     - name: ExReferenceCallBackBlock
       fn_offset: ExReferenceCallBackBlock
       type: uint32
 
     - name: ExDereferenceCallBackBlock
       fn_offset: ExDereferenceCallBackBlock
-      type: uint32
-
-    - name: PspLoadImageNotifyRoutine
-      var_offset: PspLoadImageNotifyRoutine
       type: uint32
