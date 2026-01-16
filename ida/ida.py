@@ -4,6 +4,11 @@
 #   反汇编模式 (disasm):
 #     ida64.exe -A -S"ida.py --mode disasm --func FuncName" "path/to/pe.exe"
 #
+#   交叉引用模式 (xref):
+#     ida64.exe -A -S"ida.py --mode xref --func FuncName" "path/to/pe.exe"
+#     ida64.exe -A -S"ida.py --mode xref --var VarName" "path/to/pe.exe"
+#     ida64.exe -A -S"ida.py --mode xref --func FuncName --output path/to/output.yaml" "path/to/pe.exe"
+#
 #   符号重映射模式 (symbol_remap):
 #     ida64.exe -A -S"ida.py --mode symbol_remap --symbol_remap_file path/to/SymbolMapping.yaml" "path/to/pe.exe"
 #     ida64.exe -A -S"ida.py --mode symbol_remap" "path/to/pe.exe"  # 使用 PE 同目录下的 SymbolMapping.yaml
@@ -61,11 +66,13 @@ def parse_script_args():
     解析 IDA 脚本参数
     IDA 通过 idc.ARGV 传递 -S 后的参数
     示例: -S"script.py --mode disasm --func FuncName"
+    示例: -S"script.py --mode xref --var VarName"
     示例: -S"script.py --mode symbol_remap --symbol_remap_file path/to/mapping.yaml"
     """
     args = {
         "mode": "disasm",
         "func": DISASM_FUNCTION,
+        "var": None,  # xref 模式可用于变量
         "output": None,  # 自动生成
         "symbol_remap_file": SYMBOL_MAPPING_FILE,  # symbol_remap 模式使用的映射文件
     }
@@ -79,6 +86,9 @@ def parse_script_args():
             i += 2
         elif argv[i] == "--func" and i + 1 < len(argv):
             args["func"] = argv[i + 1]
+            i += 2
+        elif argv[i] == "--var" and i + 1 < len(argv):
+            args["var"] = argv[i + 1]
             i += 2
         elif argv[i] == "--output" and i + 1 < len(argv):
             args["output"] = argv[i + 1]
@@ -277,6 +287,30 @@ def format_address(ea):
     return f"{ea:016X}"
 
 
+def format_xref_address(ea):
+    """
+    格式化 xref 来源地址
+
+    Args:
+        ea: xref 来源地址
+
+    Returns:
+        格式化的地址字符串:
+        - 如果在函数内: "函数名+0xXX"
+        - 如果不在函数内: "段:偏移" 格式
+    """
+    func = ida_funcs.get_func(ea)
+    if func:
+        func_name = ida_funcs.get_func_name(func.start_ea)
+        offset = ea - func.start_ea
+        if offset == 0:
+            return func_name
+        return f"{func_name}+0x{offset:x}"
+    else:
+        # 不在函数内，使用 段:偏移 格式
+        return format_address(ea)
+
+
 def get_function_disassembly(func_ea):
     """
     获取函数的反汇编代码
@@ -342,6 +376,39 @@ def get_function_disassembly(func_ea):
     lines.append(f"{format_address(func.end_ea - 1)} {func_name}     endp")
 
     return "\n".join(lines)
+
+
+def get_xrefs(ea):
+    """
+    获取函数或变量的所有交叉引用（被引用的位置）
+
+    Args:
+        ea: 函数起始地址或变量地址
+
+    Returns:
+        xref 信息列表，每项为 {"address": "...", "instruction": "..."}
+    """
+    xrefs = []
+
+    for xref in idautils.XrefsTo(ea, 0):
+        from_ea = xref.frm
+
+        # 格式化来源地址
+        addr_str = format_xref_address(from_ea)
+
+        # 获取反汇编指令
+        disasm_line = idc.generate_disasm_line(from_ea, 0)
+        if disasm_line:
+            instruction = ida_lines.tag_remove(disasm_line)
+        else:
+            instruction = ""
+
+        xrefs.append({
+            "address": addr_str,
+            "instruction": instruction
+        })
+
+    return xrefs
 
 
 def get_export_ordinal(ea):
@@ -413,8 +480,18 @@ def build_output_path(input_file, func_name):
     Returns:
         输出 YAML 文件路径 (函数名.yaml)
     """
-    # 获取输入文件所在目录
-    input_dir = os.path.dirname(input_file)
+    # 优先使用 IDB 文件所在目录（更可靠）
+    # 因为 idc.get_input_file_path() 返回的可能是 IDA 内部记录的路径，
+    # 而 IDB 文件总是保存在用户指定的输入文件所在目录
+    try:
+        idb_path = idc.get_idb_path()
+        if idb_path:
+            input_dir = os.path.dirname(idb_path)
+        else:
+            input_dir = os.path.dirname(input_file)
+    except:
+        input_dir = os.path.dirname(input_file)
+
     # 使用函数名作为文件名
     return os.path.join(input_dir, f"{func_name}.yaml")
 
@@ -460,6 +537,33 @@ def export_function_info(func_name, func_ea, disasm_code, output_path, pseudocod
         yaml.dump(data, fp, Dumper=LiteralDumper, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     print(f"[+] Exported to: {output_path}")
+
+
+def export_xref_info(func_name, func_ea, xrefs, output_path):
+    """
+    导出 xref 信息到 YAML 文件
+
+    Args:
+        func_name: 函数名称
+        func_ea: 函数地址
+        xrefs: xref 列表
+        output_path: 输出文件路径
+    """
+    # 确保输出目录存在
+    output_dir = os.path.dirname(output_path)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    data = {
+        "virtualaddress": hex(func_ea),
+        "xrefs": xrefs
+    }
+
+    with open(output_path, "w", encoding="utf-8") as fp:
+        yaml.dump(data, fp, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    print(f"[+] Exported {len(xrefs)} xrefs to: {output_path}")
+
 
 def main():
     """主函数"""
@@ -549,9 +653,57 @@ def main():
         # headless 模式下退出
         idc.qexit(0)
 
+    elif mode == "xref":
+        # xref 模式 - 支持 --func 或 --var
+        func_name = args["func"]
+        var_name = args["var"]
+
+        if func_name:
+            # 函数 xref 模式
+            symbol_name = func_name
+            symbol_type = "function"
+            symbol_ea = get_function_address(func_name)
+        elif var_name:
+            # 变量 xref 模式
+            symbol_name = var_name
+            symbol_type = "variable"
+            symbol_ea = ida_name.get_name_ea(ida_idaapi.BADADDR, var_name)
+        else:
+            print("[!] Function or variable name is required for xref mode")
+            print("    Usage: --mode xref --func FuncName")
+            print("           --mode xref --var VarName")
+            idc.qexit(1)
+            return
+
+        print(f"[*] Target {symbol_type}: {symbol_name}")
+
+        # 确定输出路径
+        if args["output"]:
+            output_path = args["output"]
+        else:
+            output_path = build_output_path(input_file, symbol_name)
+
+        # 检查符号是否找到
+        if symbol_ea == ida_idaapi.BADADDR:
+            print(f"[!] {symbol_type.capitalize()} '{symbol_name}' not found")
+            idc.qexit(1)
+            return
+
+        print(f"[+] Found {symbol_type} '{symbol_name}' at {hex(symbol_ea)}")
+
+        # 获取 xref 信息
+        xrefs = get_xrefs(symbol_ea)
+        print(f"[+] Found {len(xrefs)} xrefs to '{symbol_name}'")
+
+        # 导出结果
+        export_xref_info(symbol_name, symbol_ea, xrefs, output_path)
+
+        # headless 模式下退出
+        idc.qexit(0)
+
     else:
         print(f"[!] Unknown mode: {mode}")
-        print("    Supported modes: disasm, symbol_remap")
+        print("    Supported modes: disasm, xref, symbol_remap")
         idc.qexit(1)
 
 if __name__ == "__main__":
