@@ -381,12 +381,13 @@ For each PE file missing PDB:
 
 - IDA Pro with `ida64.exe`
 - Python packages: `pyyaml`, `openai` or `anthropic`
-- Output file: `kphdyn.xml`
 
 ## Reference workflow in Jenkins (Windows)
 
  - First run may takes hours downloading PE and PDB files.
  - A typical run takes ~20 mins
+ - Output file: `kphdyn.xml`
+ - All steps are running via Windows Command Prompt
 
 ```shell
 @echo Get latest kphdyn.xml
