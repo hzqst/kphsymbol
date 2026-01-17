@@ -177,6 +177,10 @@
       var_offset: PspEnumerateCallback
       type: uint32
 
+    - name: CmpEnumerateCallback
+      var_offset: CmpEnumerateCallback
+      type: uint32
+
     - name: ExReferenceCallBackBlock
       fn_offset: ExReferenceCallBackBlock
       type: uint32
