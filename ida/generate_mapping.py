@@ -66,33 +66,6 @@ DEFAULT_MODELS = {
 }
 
 
-# LLM 提示词模板（默认模板，当外部模板文件不可用时使用）
-DEFAULT_PROMPT_TEMPLATE = """You are a reverse engineering expert. I have two disassembly outputs of the same function from two different Windows kernel versions.
-
-**Reference version (with full symbols):**
-```
-{reference.procedure}
-```
-
-**Target version (with missing symbols):**
-```
-{reverse.procedure}
-```
-
-Based on the code structure and calling patterns, please identify the mapping between the unnamed symbols (like sub_XXXXXXXX, loc_XXXXXXXX) in the target version and the named symbols in the reference version.
-
-Output format (YAML only, no explanations):
-```yaml
-sub_XXXXXXXX: SymbolName
-loc_XXXXXXXX: LabelName
-```
-
-If there are no unmapped symbols to map, output an empty YAML:
-```yaml
-```
-"""
-
-
 def get_default_template_path():
     """
     获取默认模板路径（脚本同目录下的 GenerateMapping.md）
@@ -108,40 +81,29 @@ def load_prompt_template(template_path=None):
     """
     从文件加载 PROMPT_TEMPLATE
 
-    优先级:
-    1. 命令行指定的模板路径
-    2. 默认模板路径（脚本同目录下的 GenerateMapping.md）
-    3. 内置默认模板
-
     Args:
-        template_path: 命令行指定的模板路径（可选）
+        template_path: 模板路径（可选，默认为脚本同目录下的 GenerateMapping.md）
 
     Returns:
         模板字符串
+
+    Raises:
+        SystemExit: 如果模板文件不存在
     """
-    # 确定要加载的模板路径
-    if template_path:
-        path = template_path
-    else:
-        path = get_default_template_path()
+    path = template_path or get_default_template_path()
 
-    # 尝试从文件加载
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                template = f.read()
-            print(f"[+] 加载模板: {path}")
-            return template
-        except Exception as e:
-            print(f"Warning: 无法读取模板文件 {path}: {e}")
-
-    # 回退到内置默认模板
-    if template_path:
-        print(f"Error: 指定的模板文件不存在: {template_path}")
+    if not os.path.exists(path):
+        print(f"Error: 模板文件不存在: {path}")
         sys.exit(1)
 
-    print(f"[*] 使用内置默认模板")
-    return DEFAULT_PROMPT_TEMPLATE
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            template = f.read()
+        print(f"[+] 加载模板: {path}")
+        return template
+    except Exception as e:
+        print(f"Error: 无法读取模板文件 {path}: {e}")
+        sys.exit(1)
 
 
 def parse_args():
