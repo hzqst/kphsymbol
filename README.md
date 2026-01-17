@@ -409,11 +409,29 @@ exit 0
 ```
 
 ```shell
+
 @echo Generate SymbolMapping.yaml for missing-pdb ntoskrnl
 
-python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com" -ida="C:\Program Files\IDA Professional 9.0\ida64.exe"
+set IDA64_PATH=C:\Program Files\IDA Professional 9.0\ida64.exe
+set LLM_PROVIDER=openai
+set LLM_API_BASE=https://api.deepseek.com
+set LLM_MODEL=deepseek-chat
+set LLM_API_KEY=
 
-python reverse_symbols.py -symboldir="%WORKSPACE%\symbols"  -reverse=PspSetCreateProcessNotifyRoutine -provider=openai -api_key="sk-****" -model="deepseek-chat" -api_base="https://api.deepseek.com" -ida="C:\Program Files\IDA Professional 9.0\ida64.exe"
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetCreateProcessNotifyRoutine -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PspSetCreateProcessNotifyRoutine -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetCreateThreadNotifyRoutine -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PspSetCreateThreadNotifyRoutine -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetLoadImageNotifyRoutine -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PsSetLoadImageNotifyRoutineEx -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
+python reverse_symbols.py -symboldir="%WORKSPACE%\symbols" -reverse=PgInitContextFillPtr -signature=FB488D05????????4989 -no_procedure -disasm_lines=200 -template="%WORKSPACE%\ida\GenerateMappingDisasmOnly.md" -provider=%LLM_PROVIDER% -api_base="%LLM_API_BASE%" -model="%LLM_MODEL%" -api_key="%LLM_API_KEY%"
+
 ```
 
 ```shell
