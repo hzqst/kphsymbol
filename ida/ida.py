@@ -218,47 +218,53 @@ def search_signature(signature_str):
     # 规范化输入：移除空格
     sig = signature_str.replace(" ", "")
 
-    # 将连续的十六进制字符串转换为 IDA 二进制搜索模式
-    # 每两个字符为一个字节，?? 表示通配符
-    pattern_parts = []
+    # 将特征码转换为字节序列和掩码
+    # 普通字节：值为实际值，掩码为 0xFF
+    # 通配符 ??：值为 0x00，掩码为 0x00
+    data_bytes = []
+    mask_bytes = []
     i = 0
     while i < len(sig):
         if sig[i] == '?':
             # 通配符：可能是 ? 或 ??
             if i + 1 < len(sig) and sig[i + 1] == '?':
-                pattern_parts.append("?")
+                data_bytes.append(0x00)
+                mask_bytes.append(0x00)
                 i += 2
             else:
-                pattern_parts.append("?")
+                data_bytes.append(0x00)
+                mask_bytes.append(0x00)
                 i += 1
         else:
             # 普通字节：取两个字符
             if i + 1 < len(sig):
-                pattern_parts.append(sig[i:i + 2])
+                byte_val = int(sig[i:i + 2], 16)
+                data_bytes.append(byte_val)
+                mask_bytes.append(0xFF)
                 i += 2
             else:
                 # 奇数长度，跳过最后一个字符
                 i += 1
 
-    # 构建 IDA 二进制搜索模式串（空格分隔）
-    pattern = " ".join(pattern_parts)
-    print(f"[*] Searching for pattern: {pattern}")
+    data = bytes(data_bytes)
+    mask = bytes(mask_bytes)
+
+    # 打印搜索信息
+    pattern_str = " ".join(f"{b:02X}" if m == 0xFF else "??" for b, m in zip(data_bytes, mask_bytes))
+    print(f"[*] Searching for pattern: {pattern_str}")
+    print(f"[*] Pattern length: {len(data)} bytes")
 
     # 获取搜索范围
     start_ea = ida_ida.inf_get_min_ea()
     end_ea = ida_ida.inf_get_max_ea()
 
-    # 使用 compiled_binpat_vec_t.parse 编译模式字符串
-    # radix=16 表示十六进制
-    binpat = ida_bytes.compiled_binpat_vec_t.parse(start_ea, pattern, 16)
-
-    # 使用 ida_bytes.bin_search 搜索
-    # 返回 (地址, 模式索引) 元组
-    found_ea, _ = ida_bytes.bin_search(
+    # 使用 find_bytes 搜索
+    found_ea = ida_bytes.find_bytes(
+        data,
         start_ea,
-        end_ea,
-        binpat,
-        ida_bytes.BIN_SEARCH_FORWARD
+        range_end=end_ea,
+        mask=mask,
+        flags=ida_bytes.BIN_SEARCH_FORWARD
     )
 
     return found_ea
@@ -491,6 +497,70 @@ def get_function_disassembly(func_ea, max_lines=None):
         lines.append(f"; ... (truncated, showing {max_lines} lines)")
     else:
         lines.append(f"{format_address(func.end_ea - 1)} {func_name}     endp")
+
+    return "\n".join(lines)
+
+
+def get_disassembly_from_address(start_ea, max_lines):
+    """
+    从指定地址开始获取反汇编代码（用于特征码搜索模式）
+
+    Args:
+        start_ea: 起始地址（特征码匹配的地址）
+        max_lines: 最大反汇编行数限制
+
+    Returns:
+        反汇编代码字符串
+    """
+    lines = []
+    instruction_count = 0
+
+    # 获取包含该地址的函数（如果存在）
+    func = ida_funcs.get_func(start_ea)
+    end_ea = func.end_ea if func else ida_ida.inf_get_max_ea()
+
+    # 获取该地址处的函数名（用于 public 声明）
+    actual_func_name = ida_funcs.get_func_name(start_ea) if func else None
+
+    # 添加 public 声明（显示特征码地址和函数名）
+    if actual_func_name:
+        lines.append(f"{format_address(start_ea)}                 public {actual_func_name}")
+        lines.append(f"{format_address(start_ea)} {actual_func_name}     proc near")
+
+    # 从特征码地址开始遍历
+    ea = start_ea
+    truncated = False
+    while ea < end_ea:
+        # 检查是否达到行数限制
+        if max_lines is not None and instruction_count >= max_lines:
+            truncated = True
+            break
+
+        # 添加地址
+        addr_str = format_address(ea)
+
+        # 检查是否有标签（跳转目标等）
+        name_at_ea = ida_name.get_name(ea)
+        if name_at_ea and name_at_ea != actual_func_name and instruction_count > 0:
+            # 这是一个标签行
+            lines.append(f"{addr_str}")
+            lines.append(f"{addr_str} {name_at_ea}:")
+
+        # 生成反汇编行并移除颜色标签
+        disasm_line = idc.generate_disasm_line(ea, 0)
+        if disasm_line:
+            clean_line = ida_lines.tag_remove(disasm_line)
+            lines.append(f"{addr_str}                 {clean_line}")
+            instruction_count += 1
+
+        # 移动到下一条指令
+        ea = idc.next_head(ea, end_ea)
+        if ea == ida_idaapi.BADADDR:
+            break
+
+    # 添加截断提示
+    if truncated:
+        lines.append(f"; ... (truncated, showing {max_lines} lines)")
 
     return "\n".join(lines)
 
