@@ -244,19 +244,21 @@ def search_signature(signature_str):
     pattern = " ".join(pattern_parts)
     print(f"[*] Searching for pattern: {pattern}")
 
-    # 获取搜索范围：从最小地址到最大地址
+    # 获取搜索范围
     start_ea = ida_ida.inf_get_min_ea()
     end_ea = ida_ida.inf_get_max_ea()
 
+    # 使用 compiled_binpat_vec_t.parse 编译模式字符串
+    # radix=16 表示十六进制
+    binpat = ida_bytes.compiled_binpat_vec_t.parse(start_ea, pattern, 16)
+
     # 使用 ida_bytes.bin_search 搜索
-    # 返回第一个匹配的地址
-    found_ea = ida_bytes.bin_search(
+    # 返回 (地址, 模式索引) 元组
+    found_ea, _ = ida_bytes.bin_search(
         start_ea,
         end_ea,
-        pattern.encode('utf-8'),
-        None,  # mask (None 表示使用模式中的 ? 作为通配符)
-        ida_bytes.BIN_SEARCH_FORWARD | ida_bytes.BIN_SEARCH_NOCASE,
-        0  # radix (0 表示自动检测)
+        binpat,
+        ida_bytes.BIN_SEARCH_FORWARD
     )
 
     return found_ea
