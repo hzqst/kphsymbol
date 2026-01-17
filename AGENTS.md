@@ -23,7 +23,7 @@
 - 快速说明：`README.md`
 - 依赖说明：`requirements.txt`
 - 主要脚本入口：`download_symbols.py`、`update_symbols.py`、`reverse_symbols.py`、`upload_server.py`、`migrate_symboldir.py`
-- 逆向相关脚本：`ida/generate_mapping.py`
+- 逆向相关脚本：`ida/generate_mapping.py`、`ida/ida.py`
 - 配置/数据：`kphdyn.xml`、`kphdyn.yaml`、`kphdyn2.yaml`、`kphdyn.official.xml`
 - 大体量目录（避免全量读取）：`symbols/`、`output/`、`uploads/`
 
