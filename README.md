@@ -1,6 +1,6 @@
 # Toolkits for KPH Dynamic Data
 
-Several scripts are included to generate offsets for [SystemInformer](https://github.com/winsiderss/systeminformer)'s [kphdyn.xml](https://github.com/winsiderss/systeminformer/blob/master/kphlib/kphdyn.xml), adding your own "struct_offset", or even "func_offset" to it (customized via `kphdyn.yaml`).
+Several scripts are included to generate offsets for [SystemInformer](https://github.com/winsiderss/systeminformer)'s [kphdyn.xml](https://github.com/winsiderss/systeminformer/blob/master/kphlib/kphdyn.xml), adding your own "struct_offset", or even "func_offset" to it (can be customized via `kphdyn.yaml`).
 
 ## Get kphdyn.xml
 
@@ -381,8 +381,12 @@ For each PE file missing PDB:
 
 - IDA Pro with `ida64.exe`
 - Python packages: `pyyaml`, `openai` or `anthropic`
+- Output file: `kphdyn.xml`
 
 ## Reference workflow in Jenkins (Windows)
+
+ - First run may takes hours downloading PE and PDB files.
+ - A typical run takes ~20 mins
 
 ```shell
 @echo Get latest kphdyn.xml
