@@ -100,6 +100,24 @@ def parse_args():
         action="store_true",
         help="Enable debug output"
     )
+    parser.add_argument(
+        "-signature",
+        help="Signature pattern for function search (e.g., FB488D05????????4989)"
+    )
+    parser.add_argument(
+        "-no_procedure",
+        action="store_true",
+        help="Skip pseudocode output in IDA disasm"
+    )
+    parser.add_argument(
+        "-disasm_lines",
+        type=int,
+        help="Limit disassembly output to N lines"
+    )
+    parser.add_argument(
+        "-template",
+        help="Custom PROMPT_TEMPLATE file path for generate_mapping.py"
+    )
 
     args = parser.parse_args()
 
@@ -432,7 +450,7 @@ def get_yaml_path(pe_path, func_name):
     return os.path.join(pe_dir, f"{func_name}.yaml")
 
 
-def run_ida_disasm(ida_path, func_name, pe_path, debug=False):
+def run_ida_disasm(ida_path, func_name, pe_path, signature=None, no_procedure=False, disasm_lines=None, debug=False):
     """
     Run IDA to generate function disassembly.
 
@@ -440,6 +458,9 @@ def run_ida_disasm(ida_path, func_name, pe_path, debug=False):
         ida_path: Path to ida64.exe
         func_name: Function name
         pe_path: PE file path
+        signature: Signature pattern for function search (optional)
+        no_procedure: Skip pseudocode output (optional)
+        disasm_lines: Limit disassembly output lines (optional)
         debug: Enable debug output
 
     Returns:
@@ -462,6 +483,12 @@ def run_ida_disasm(ida_path, func_name, pe_path, debug=False):
 
     # Build IDA command
     script_arg = f'{ida_script} --mode disasm --func {func_name}'
+    if signature:
+        script_arg += f' --signature {signature}'
+    if no_procedure:
+        script_arg += ' --no_procedure'
+    if disasm_lines:
+        script_arg += f' --disasm_lines {disasm_lines}'
     cmd = [
         ida_path,
         "-A",  # Autonomous mode
@@ -568,7 +595,7 @@ def run_ida_symbol_remap(ida_path, pe_path, debug=False):
         return False
 
 
-def run_generate_mapping(func_name, reference_pe, reverse_pe, provider, api_key, api_base, model, debug=False):
+def run_generate_mapping(func_name, reference_pe, reverse_pe, provider, api_key, api_base, model, template=None, debug=False):
     """
     Run generate_mapping.py to create symbol mappings.
 
@@ -580,6 +607,7 @@ def run_generate_mapping(func_name, reference_pe, reverse_pe, provider, api_key,
         api_key: API key
         api_base: API base URL (optional)
         model: Model name (optional)
+        template: Custom PROMPT_TEMPLATE file path (optional)
         debug: Enable debug output
 
     Returns:
@@ -608,6 +636,8 @@ def run_generate_mapping(func_name, reference_pe, reverse_pe, provider, api_key,
         cmd.append(f"-model={model}")
     if api_base:
         cmd.append(f"-api_base={api_base}")
+    if template:
+        cmd.append(f"-template={template}")
     if debug:
         cmd.append("-debug")
 
@@ -640,7 +670,8 @@ def run_generate_mapping(func_name, reference_pe, reverse_pe, provider, api_key,
         return False
 
 
-def process_pe(pe_info, reference_info, func_name, ida_path, provider, api_key, api_base, model, debug=False):
+def process_pe(pe_info, reference_info, func_name, ida_path, provider, api_key, api_base, model,
+               signature=None, no_procedure=False, disasm_lines=None, template=None, debug=False):
     """
     Process a single PE file (complete workflow).
 
@@ -653,6 +684,10 @@ def process_pe(pe_info, reference_info, func_name, ida_path, provider, api_key, 
         api_key: API key
         api_base: API base URL (optional)
         model: Model name (optional)
+        signature: Signature pattern for function search (optional)
+        no_procedure: Skip pseudocode output (optional)
+        disasm_lines: Limit disassembly output lines (optional)
+        template: Custom PROMPT_TEMPLATE file path (optional)
         debug: Enable debug output
 
     Returns:
@@ -663,19 +698,19 @@ def process_pe(pe_info, reference_info, func_name, ida_path, provider, api_key, 
 
     # Step 1: Run IDA disasm on target PE
     print(f"  Step 1: Running IDA disasm on target PE...")
-    if not run_ida_disasm(ida_path, func_name, target_pe, debug):
+    if not run_ida_disasm(ida_path, func_name, target_pe, signature, no_procedure, disasm_lines, debug):
         print(f"  Step 1 failed!")
         return False
 
     # Step 2: Run IDA disasm on reference PE
     print(f"  Step 2: Running IDA disasm on reference PE...")
-    if not run_ida_disasm(ida_path, func_name, reference_pe, debug):
+    if not run_ida_disasm(ida_path, func_name, reference_pe, signature, no_procedure, disasm_lines, debug):
         print(f"  Step 2 failed!")
         return False
 
     # Step 3: Generate symbol mapping via LLM
     print(f"  Step 3: Generating symbol mapping via LLM...")
-    if not run_generate_mapping(func_name, reference_pe, target_pe, provider, api_key, api_base, model, debug):
+    if not run_generate_mapping(func_name, reference_pe, target_pe, provider, api_key, api_base, model, template, debug):
         print(f"  Step 3 failed!")
         return False
 
@@ -697,6 +732,10 @@ def main():
     func_name = args.reverse
     provider = args.provider
     debug = args.debug
+    signature = args.signature
+    no_procedure = args.no_procedure
+    disasm_lines = args.disasm_lines
+    template = args.template
 
     # Validate symbol directory
     if not os.path.exists(symboldir):
@@ -721,6 +760,14 @@ def main():
         print(f"API base: {api_base}")
     if debug:
         print(f"Debug mode: enabled")
+    if signature:
+        print(f"Signature: {signature}")
+    if no_procedure:
+        print(f"No procedure: enabled")
+    if disasm_lines:
+        print(f"Disasm lines: {disasm_lines}")
+    if template:
+        print(f"Template: {template}")
 
     # Scan symbol directory
     print(f"\nScanning symbol directory...")
@@ -776,7 +823,8 @@ def main():
         print(f"  Reference version: {reference['version']} [{reference['sha256'][:16]}...]")
 
         # Process this PE
-        if process_pe(pe_info, reference, func_name, ida_path, provider, api_key, api_base, model, debug):
+        if process_pe(pe_info, reference, func_name, ida_path, provider, api_key, api_base, model,
+                      signature, no_procedure, disasm_lines, template, debug):
             success_count += 1
         else:
             fail_count += 1
