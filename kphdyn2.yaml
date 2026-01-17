@@ -182,9 +182,9 @@
       type: uint32
 
     - name: PspEnumerateCallback
-      func_offset: PspEnumerateCallback
+      fn_offset: PspEnumerateCallback
       type: uint32
 
     - name: CmpEnumerateCallback
-      func_offset: CmpEnumerateCallback
+      fn_offset: CmpEnumerateCallback
       type: uint32
