@@ -173,18 +173,18 @@
       var_offset: PspCreateThreadNotifyRoutine
       type: uint32
 
-    - name: PspEnumerateCallback
-      var_offset: PspEnumerateCallback
-      type: uint32
-
-    - name: CmpEnumerateCallback
-      var_offset: CmpEnumerateCallback
-      type: uint32
-
     - name: ExReferenceCallBackBlock
       fn_offset: ExReferenceCallBackBlock
       type: uint32
 
     - name: ExDereferenceCallBackBlock
       fn_offset: ExDereferenceCallBackBlock
+      type: uint32
+
+    - name: PspEnumerateCallback
+      func_offset: PspEnumerateCallback
+      type: uint32
+
+    - name: CmpEnumerateCallback
+      func_offset: CmpEnumerateCallback
       type: uint32
