@@ -6,6 +6,10 @@
 #     ida64.exe -A -S"ida.py --mode disasm --signature FB488D05????????4989 --func FuncName" "path/to/pe.exe"
 #     ida64.exe -A -S"ida.py --mode disasm --func FuncName --disasm_lines 18" "path/to/pe.exe"
 #     ida64.exe -A -S"ida.py --mode disasm --func FuncName --no_procedure" "path/to/pe.exe"
+#     ida64.exe -A -S"ida.py --mode disasm --func FuncName --no_qexit" "path/to/pe.exe"
+#
+#   通用参数:
+#     --no_qexit: 任务完成/失败时不自动退出 IDA (用于 GUI 调试)
 #
 #   交叉引用模式 (xref):
 #     ida64.exe -A -S"ida.py --mode xref --func FuncName" "path/to/pe.exe"
@@ -84,6 +88,7 @@ def parse_script_args():
         "signature": None,  # 特征码搜索
         "disasm_lines": None,  # 反汇编行数限制
         "no_procedure": False,  # 跳过伪代码输出
+        "no_qexit": False,  # 任务完成/失败时不自动退出 IDA
     }
 
     argv = idc.ARGV if hasattr(idc, 'ARGV') else []
@@ -114,10 +119,32 @@ def parse_script_args():
         elif argv[i] == "--no_procedure":
             args["no_procedure"] = True
             i += 1
+        elif argv[i] == "--no_qexit":
+            args["no_qexit"] = True
+            i += 1
         else:
             i += 1
 
     return args
+
+# 全局变量：控制是否在任务完成/失败时退出 IDA
+_no_qexit = False
+
+
+def safe_qexit(exit_code):
+    """
+    安全退出函数，根据 --no_qexit 参数决定是否退出 IDA
+
+    Args:
+        exit_code: 退出码 (0 表示成功，非 0 表示失败)
+    """
+    global _no_qexit
+    if _no_qexit:
+        status = "SUCCESS" if exit_code == 0 else "FAILED"
+        print(f"[*] Task {status} (exit code: {exit_code}), staying in IDA (--no_qexit)")
+        return
+    idc.qexit(exit_code)
+
 
 def wait_auto():
     """等待 IDA 自动分析完成"""
@@ -659,6 +686,10 @@ def main():
     args = parse_script_args()
     mode = args["mode"]
 
+    # 设置全局退出控制
+    global _no_qexit
+    _no_qexit = args["no_qexit"]
+
     print(f"[*] Mode: {mode}")
 
     # 等待自动分析完成
@@ -687,7 +718,7 @@ def main():
         print(f"    Skipped: {skip}")
 
         # headless 模式下退出
-        idc.qexit(0 if fail == 0 else 1)
+        safe_qexit(0 if fail == 0 else 1)
         return
 
     elif mode == "disasm":
@@ -701,7 +732,7 @@ def main():
             print("[!] Function name is required for disasm mode")
             print("    Usage: --mode disasm --func FuncName")
             print("           --mode disasm --signature HEXSTRING --func FuncName")
-            idc.qexit(1)
+            safe_qexit(1)
             return
 
         print(f"[*] Target function: {func_name}")
@@ -718,7 +749,7 @@ def main():
             func_ea = search_signature(signature)
             if func_ea == ida_idaapi.BADADDR:
                 print(f"[!] Signature not found: {signature}")
-                idc.qexit(1)
+                safe_qexit(1)
                 return
             print(f"[+] Found signature at {hex(func_ea)}")
         else:
@@ -726,7 +757,7 @@ def main():
             func_ea = get_function_address(func_name)
             if func_ea == ida_idaapi.BADADDR:
                 print(f"[!] Function '{func_name}' not found")
-                idc.qexit(1)
+                safe_qexit(1)
                 return
             print(f"[+] Found function '{func_name}' at {hex(func_ea)}")
 
@@ -737,7 +768,7 @@ def main():
         disasm_code = get_function_disassembly(func_ea, max_lines=disasm_lines)
         if not disasm_code:
             print(f"[!] Failed to get disassembly for '{func_name}'")
-            idc.qexit(1)
+            safe_qexit(1)
             return
 
         if disasm_lines:
@@ -761,7 +792,7 @@ def main():
         export_function_info(func_name, func_ea, disasm_code, output_path, pseudocode)
 
         # headless 模式下退出
-        idc.qexit(0)
+        safe_qexit(0)
 
     elif mode == "xref":
         # xref 模式 - 支持 --func 或 --var
@@ -782,7 +813,7 @@ def main():
             print("[!] Function or variable name is required for xref mode")
             print("    Usage: --mode xref --func FuncName")
             print("           --mode xref --var VarName")
-            idc.qexit(1)
+            safe_qexit(1)
             return
 
         print(f"[*] Target {symbol_type}: {symbol_name}")
@@ -796,7 +827,7 @@ def main():
         # 检查符号是否找到
         if symbol_ea == ida_idaapi.BADADDR:
             print(f"[!] {symbol_type.capitalize()} '{symbol_name}' not found")
-            idc.qexit(1)
+            safe_qexit(1)
             return
 
         print(f"[+] Found {symbol_type} '{symbol_name}' at {hex(symbol_ea)}")
@@ -809,12 +840,12 @@ def main():
         export_xref_info(symbol_name, symbol_ea, xrefs, output_path)
 
         # headless 模式下退出
-        idc.qexit(0)
+        safe_qexit(0)
 
     else:
         print(f"[!] Unknown mode: {mode}")
         print("    Supported modes: disasm, xref, symbol_remap")
-        idc.qexit(1)
+        safe_qexit(1)
 
 if __name__ == "__main__":
     main()
