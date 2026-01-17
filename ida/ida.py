@@ -836,8 +836,14 @@ def main():
         # 跳转到函数 (在 GUI 模式下有效)
         ida_kernwin.jumpto(func_ea)
 
-        # 获取反汇编代码（带行数限制）
-        disasm_code = get_function_disassembly(func_ea, max_lines=disasm_lines)
+        # 获取反汇编代码
+        if signature:
+            # 特征码模式：从特征码地址开始反汇编
+            disasm_code = get_disassembly_from_address(func_ea, max_lines=disasm_lines)
+        else:
+            # 函数名模式：从函数头部开始反汇编
+            disasm_code = get_function_disassembly(func_ea, max_lines=disasm_lines)
+
         if not disasm_code:
             print(f"[!] Failed to get disassembly for '{func_name}'")
             safe_qexit(1)
