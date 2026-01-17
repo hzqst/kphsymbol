@@ -66,17 +66,17 @@ DEFAULT_MODELS = {
 }
 
 
-# LLM 提示词模板
-PROMPT_TEMPLATE = """You are a reverse engineering expert. I have two disassembly outputs of the same function from two different Windows kernel versions.
+# LLM 提示词模板（默认模板，当外部模板文件不可用时使用）
+DEFAULT_PROMPT_TEMPLATE = """You are a reverse engineering expert. I have two disassembly outputs of the same function from two different Windows kernel versions.
 
 **Reference version (with full symbols):**
 ```
-{reference_code}
+{reference.procedure}
 ```
 
 **Target version (with missing symbols):**
 ```
-{reverse_code}
+{reverse.procedure}
 ```
 
 Based on the code structure and calling patterns, please identify the mapping between the unnamed symbols (like sub_XXXXXXXX, loc_XXXXXXXX) in the target version and the named symbols in the reference version.
@@ -91,6 +91,57 @@ If there are no unmapped symbols to map, output an empty YAML:
 ```yaml
 ```
 """
+
+
+def get_default_template_path():
+    """
+    获取默认模板路径（脚本同目录下的 GenerateMapping.md）
+
+    Returns:
+        默认模板文件路径
+    """
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "GenerateMapping.md")
+
+
+def load_prompt_template(template_path=None):
+    """
+    从文件加载 PROMPT_TEMPLATE
+
+    优先级:
+    1. 命令行指定的模板路径
+    2. 默认模板路径（脚本同目录下的 GenerateMapping.md）
+    3. 内置默认模板
+
+    Args:
+        template_path: 命令行指定的模板路径（可选）
+
+    Returns:
+        模板字符串
+    """
+    # 确定要加载的模板路径
+    if template_path:
+        path = template_path
+    else:
+        path = get_default_template_path()
+
+    # 尝试从文件加载
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                template = f.read()
+            print(f"[+] 加载模板: {path}")
+            return template
+        except Exception as e:
+            print(f"Warning: 无法读取模板文件 {path}: {e}")
+
+    # 回退到内置默认模板
+    if template_path:
+        print(f"Error: 指定的模板文件不存在: {template_path}")
+        sys.exit(1)
+
+    print(f"[*] 使用内置默认模板")
+    return DEFAULT_PROMPT_TEMPLATE
 
 
 def parse_args():
@@ -139,6 +190,10 @@ def parse_args():
         "-debug",
         action="store_true",
         help="启用调试输出"
+    )
+    parser.add_argument(
+        "-template",
+        help="自定义 PROMPT_TEMPLATE 文件路径（默认: ida/GenerateMapping.md）"
     )
 
     return parser.parse_args()
@@ -337,19 +392,91 @@ def run_ida_disasm(ida_path, func_name, pe_path, debug=False):
         sys.exit(1)
 
 
-def load_yaml_procedure(yaml_path):
+def load_yaml_data(yaml_path):
     """
-    加载 YAML 并返回 procedure 内容
+    加载完整的 YAML 数据
 
     Args:
         yaml_path: YAML 文件路径
 
     Returns:
-        procedure 字符串
+        dict: YAML 文件中的所有数据，支持任意字段
     """
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    return data.get("procedure", "")
+    return data if data else {}
+
+
+def format_xrefs(xrefs):
+    """
+    格式化 xrefs 列表为字符串
+
+    Args:
+        xrefs: xref 列表，每项为 {"address": "...", "instruction": "..."}
+
+    Returns:
+        格式化的字符串，如果 xrefs 为 None 则返回空字符串
+    """
+    if not xrefs:
+        return ""
+
+    lines = []
+    for xref in xrefs:
+        addr = xref.get("address", "")
+        instr = xref.get("instruction", "")
+        lines.append(f"{addr}: {instr}")
+    return "\n".join(lines)
+
+
+def format_prompt(template, ref_data, rev_data):
+    """
+    使用 YAML 数据格式化模板
+
+    支持的占位符格式:
+    - {reference.xxx} - reference YAML 中的 xxx 字段
+    - {reverse.xxx} - reverse YAML 中的 xxx 字段
+
+    例如:
+    - {reference.procedure} - reference PE 的 procedure
+    - {reference.disasm_code} - reference PE 的 disasm_code
+    - {reference.xrefs} - reference PE 的 xrefs
+    - {reference.virtualaddress} - reference PE 的 virtualaddress
+    - {reverse.procedure} - reverse PE 的对应字段
+    - ... 同理
+
+    Args:
+        template: 模板字符串
+        ref_data: reference YAML 数据字典
+        rev_data: reverse YAML 数据字典
+
+    Returns:
+        格式化后的 prompt 字符串
+    """
+    def get_field_value(data, field_name):
+        """获取字段值，对于 xrefs 等特殊字段进行格式化"""
+        value = data.get(field_name)
+        if value is None:
+            return ""
+        # xrefs 是列表，需要特殊格式化
+        if field_name == "xrefs" and isinstance(value, list):
+            return format_xrefs(value)
+        return str(value)
+
+    def replace_placeholder(match):
+        """替换占位符"""
+        prefix = match.group(1)  # reference 或 reverse
+        field = match.group(2)   # 字段名
+
+        if prefix == "reference":
+            return get_field_value(ref_data, field)
+        elif prefix == "reverse":
+            return get_field_value(rev_data, field)
+        else:
+            return match.group(0)  # 未知前缀，保持原样
+
+    # 匹配 {reference.xxx} 或 {reverse.xxx} 格式的占位符
+    pattern = r'\{(reference|reverse)\.(\w+)\}'
+    return re.sub(pattern, replace_placeholder, template)
 
 
 def extract_unmapped_symbols(procedure_text):
@@ -366,13 +493,12 @@ def extract_unmapped_symbols(procedure_text):
     return set(re.findall(pattern, procedure_text))
 
 
-def call_llm_for_mapping(reference_code, reverse_code, provider, api_key, api_base, model, debug=False):
+def call_llm_for_mapping(prompt, provider, api_key, api_base, model, debug=False):
     """
     调用 LLM 获取符号映射
 
     Args:
-        reference_code: 参考版本的反汇编代码
-        reverse_code: 待分析版本的反汇编代码
+        prompt: 格式化后的提示词
         provider: API 提供商 (openai 或 anthropic)
         api_key: API 密钥
         api_base: API 基础 URL
@@ -382,11 +508,6 @@ def call_llm_for_mapping(reference_code, reverse_code, provider, api_key, api_ba
     Returns:
         LLM 响应文本
     """
-    prompt = PROMPT_TEMPLATE.format(
-        reference_code=reference_code,
-        reverse_code=reverse_code
-    )
-
     if debug:
         print(f"  提供商: {provider}")
         print(f"  使用模型: {model}")
@@ -559,6 +680,9 @@ def main():
     print(f"[*] API 提供商: {provider}")
     print(f"[*] 模型: {model}")
 
+    # 加载模板
+    template = load_prompt_template(args.template)
+
     # 验证文件存在
     if not os.path.exists(reference_pe):
         print(f"Error: 参考 PE 文件不存在: {reference_pe}")
@@ -608,30 +732,35 @@ def main():
 
     # 读取 YAML 内容
     print(f"[*] 读取反汇编内容...")
-    reference_code = load_yaml_procedure(ref_yaml_path)
-    reverse_code = load_yaml_procedure(rev_yaml_path)
+    ref_data = load_yaml_data(ref_yaml_path)
+    rev_data = load_yaml_data(rev_yaml_path)
 
-    if not reference_code:
-        print(f"Error: 参考版本 YAML 为空: {ref_yaml_path}")
+    if not ref_data.get("procedure"):
+        print(f"Error: 参考版本 YAML 的 procedure 为空: {ref_yaml_path}")
         sys.exit(1)
 
-    if not reverse_code:
-        print(f"Error: 待分析版本 YAML 为空: {rev_yaml_path}")
+    if not rev_data.get("procedure"):
+        print(f"Error: 待分析版本 YAML 的 procedure 为空: {rev_yaml_path}")
         sys.exit(1)
 
     # 检查是否有需要映射的符号
-    unmapped_symbols = extract_unmapped_symbols(reverse_code)
+    unmapped_symbols = extract_unmapped_symbols(rev_data.get("procedure", ""))
     if not unmapped_symbols:
         print(f"[*] 待分析版本没有未映射的符号 (sub_xxx, loc_xxx)，无需处理")
         sys.exit(0)
 
     print(f"[*] 发现 {len(unmapped_symbols)} 个未映射符号: {', '.join(sorted(unmapped_symbols))}")
 
+    # 格式化 prompt
+    prompt = format_prompt(template, ref_data, rev_data)
+
+    if debug:
+        print(f"  格式化后的 prompt:\n{prompt[:500]}...")
+
     # 调用 LLM
     print(f"[*] 调用 LLM 进行符号映射...")
     llm_response = call_llm_for_mapping(
-        reference_code, reverse_code,
-        provider, api_key, api_base, model, debug
+        prompt, provider, api_key, api_base, model, debug
     )
 
     if debug:
