@@ -2,14 +2,14 @@ You are a reverse engineering expert. I have two disassembly outputs of the same
 
 **Reference version (with full symbols):**
 
-```c
-{reference.procedure}
+```
+{reference.disasm_code}
 ```
 
 **Target version (with missing symbols):**
 
-```c
-{reverse.procedure}
+```
+{reverse.disasm_code}
 ```
 
 Based on the code structure and calling patterns, please identify the mapping between the unnamed symbols (like sub_XXXXXXXX, loc_XXXXXXXX) in the target version and the named symbols in the reference version.
