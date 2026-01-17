@@ -3,6 +3,9 @@
 # 用法:
 #   反汇编模式 (disasm):
 #     ida64.exe -A -S"ida.py --mode disasm --func FuncName" "path/to/pe.exe"
+#     ida64.exe -A -S"ida.py --mode disasm --signature FB488D05????????4989 --func FuncName" "path/to/pe.exe"
+#     ida64.exe -A -S"ida.py --mode disasm --func FuncName --disasm_lines 18" "path/to/pe.exe"
+#     ida64.exe -A -S"ida.py --mode disasm --func FuncName --no_procedure" "path/to/pe.exe"
 #
 #   交叉引用模式 (xref):
 #     ida64.exe -A -S"ida.py --mode xref --func FuncName" "path/to/pe.exe"
@@ -40,8 +43,10 @@
 #
 
 import ida_auto
+import ida_bytes
 import ida_funcs
 import ida_hexrays
+import ida_ida
 import ida_kernwin
 import ida_lines
 import ida_name
@@ -66,6 +71,7 @@ def parse_script_args():
     解析 IDA 脚本参数
     IDA 通过 idc.ARGV 传递 -S 后的参数
     示例: -S"script.py --mode disasm --func FuncName"
+    示例: -S"script.py --mode disasm --signature FB488D05????????4989 --func FuncName"
     示例: -S"script.py --mode xref --var VarName"
     示例: -S"script.py --mode symbol_remap --symbol_remap_file path/to/mapping.yaml"
     """
@@ -75,6 +81,9 @@ def parse_script_args():
         "var": None,  # xref 模式可用于变量
         "output": None,  # 自动生成
         "symbol_remap_file": SYMBOL_MAPPING_FILE,  # symbol_remap 模式使用的映射文件
+        "signature": None,  # 特征码搜索
+        "disasm_lines": None,  # 反汇编行数限制
+        "no_procedure": False,  # 跳过伪代码输出
     }
 
     argv = idc.ARGV if hasattr(idc, 'ARGV') else []
@@ -96,6 +105,15 @@ def parse_script_args():
         elif argv[i] == "--symbol_remap_file" and i + 1 < len(argv):
             args["symbol_remap_file"] = argv[i + 1]
             i += 2
+        elif argv[i] == "--signature" and i + 1 < len(argv):
+            args["signature"] = argv[i + 1]
+            i += 2
+        elif argv[i] == "--disasm_lines" and i + 1 < len(argv):
+            args["disasm_lines"] = int(argv[i + 1])
+            i += 2
+        elif argv[i] == "--no_procedure":
+            args["no_procedure"] = True
+            i += 1
         else:
             i += 1
 
@@ -157,6 +175,64 @@ def get_function_address(func_name):
             return func_ea
 
     return ida_idaapi.BADADDR
+
+
+def search_signature(signature_str):
+    """
+    使用特征码搜索内存地址
+
+    Args:
+        signature_str: 特征码字符串，如 "FB488D05????????4989" 或 "FB 48 8D 05 ?? ?? ?? ?? 49 89"
+                      ?? 或 ? 表示通配符
+
+    Returns:
+        找到的第一个地址，未找到返回 ida_idaapi.BADADDR
+    """
+    # 规范化输入：移除空格
+    sig = signature_str.replace(" ", "")
+
+    # 将连续的十六进制字符串转换为 IDA 二进制搜索模式
+    # 每两个字符为一个字节，?? 表示通配符
+    pattern_parts = []
+    i = 0
+    while i < len(sig):
+        if sig[i] == '?':
+            # 通配符：可能是 ? 或 ??
+            if i + 1 < len(sig) and sig[i + 1] == '?':
+                pattern_parts.append("?")
+                i += 2
+            else:
+                pattern_parts.append("?")
+                i += 1
+        else:
+            # 普通字节：取两个字符
+            if i + 1 < len(sig):
+                pattern_parts.append(sig[i:i + 2])
+                i += 2
+            else:
+                # 奇数长度，跳过最后一个字符
+                i += 1
+
+    # 构建 IDA 二进制搜索模式串（空格分隔）
+    pattern = " ".join(pattern_parts)
+    print(f"[*] Searching for pattern: {pattern}")
+
+    # 获取搜索范围：从最小地址到最大地址
+    start_ea = ida_ida.inf_get_min_ea()
+    end_ea = ida_ida.inf_get_max_ea()
+
+    # 使用 ida_bytes.bin_search 搜索
+    # 返回第一个匹配的地址
+    found_ea = ida_bytes.bin_search(
+        start_ea,
+        end_ea,
+        pattern.encode('utf-8'),
+        None,  # mask (None 表示使用模式中的 ? 作为通配符)
+        ida_bytes.BIN_SEARCH_FORWARD | ida_bytes.BIN_SEARCH_NOCASE,
+        0  # radix (0 表示自动检测)
+    )
+
+    return found_ea
 
 
 def rename_function(ea, new_name):
@@ -311,12 +387,13 @@ def format_xref_address(ea):
         return format_address(ea)
 
 
-def get_function_disassembly(func_ea):
+def get_function_disassembly(func_ea, max_lines=None):
     """
     获取函数的反汇编代码
 
     Args:
         func_ea: 函数起始地址
+        max_lines: 最大反汇编行数限制（None 表示不限制）
 
     Returns:
         反汇编代码字符串
@@ -326,6 +403,7 @@ def get_function_disassembly(func_ea):
         return None
 
     lines = []
+    instruction_count = 0
 
     # 获取函数名
     func_name = ida_funcs.get_func_name(func_ea)
@@ -347,7 +425,13 @@ def get_function_disassembly(func_ea):
 
     # 遍历函数内的每条指令
     ea = func.start_ea
+    truncated = False
     while ea < func.end_ea:
+        # 检查是否达到行数限制
+        if max_lines is not None and instruction_count >= max_lines:
+            truncated = True
+            break
+
         line_parts = []
 
         # 添加地址
@@ -366,14 +450,18 @@ def get_function_disassembly(func_ea):
         if disasm_line:
             clean_line = ida_lines.tag_remove(disasm_line)
             lines.append(f"{addr_str}                 {clean_line}")
+            instruction_count += 1
 
         # 移动到下一条指令
         ea = idc.next_head(ea, func.end_ea)
         if ea == ida_idaapi.BADADDR:
             break
 
-    # 添加函数结束标记
-    lines.append(f"{format_address(func.end_ea - 1)} {func_name}     endp")
+    # 添加截断提示或函数结束标记
+    if truncated:
+        lines.append(f"; ... (truncated, showing {max_lines} lines)")
+    else:
+        lines.append(f"{format_address(func.end_ea - 1)} {func_name}     endp")
 
     return "\n".join(lines)
 
@@ -605,9 +693,14 @@ def main():
     elif mode == "disasm":
         # 反汇编模式
         func_name = args["func"]
+        signature = args["signature"]
+        disasm_lines = args["disasm_lines"]
+        no_procedure = args["no_procedure"]
+
         if not func_name:
             print("[!] Function name is required for disasm mode")
             print("    Usage: --mode disasm --func FuncName")
+            print("           --mode disasm --signature HEXSTRING --func FuncName")
             idc.qexit(1)
             return
 
@@ -619,33 +712,50 @@ def main():
         else:
             output_path = build_output_path(input_file, func_name)
 
-        # 查找函数地址
-        func_ea = get_function_address(func_name)
-        if func_ea == ida_idaapi.BADADDR:
-            print(f"[!] Function '{func_name}' not found")
-            idc.qexit(1)
-            return
-
-        print(f"[+] Found function '{func_name}' at {hex(func_ea)}")
+        # 优先使用特征码搜索
+        if signature:
+            print(f"[*] Searching by signature: {signature}")
+            func_ea = search_signature(signature)
+            if func_ea == ida_idaapi.BADADDR:
+                print(f"[!] Signature not found: {signature}")
+                idc.qexit(1)
+                return
+            print(f"[+] Found signature at {hex(func_ea)}")
+        else:
+            # 回退到函数名查找
+            func_ea = get_function_address(func_name)
+            if func_ea == ida_idaapi.BADADDR:
+                print(f"[!] Function '{func_name}' not found")
+                idc.qexit(1)
+                return
+            print(f"[+] Found function '{func_name}' at {hex(func_ea)}")
 
         # 跳转到函数 (在 GUI 模式下有效)
         ida_kernwin.jumpto(func_ea)
 
-        # 获取反汇编代码
-        disasm_code = get_function_disassembly(func_ea)
+        # 获取反汇编代码（带行数限制）
+        disasm_code = get_function_disassembly(func_ea, max_lines=disasm_lines)
         if not disasm_code:
             print(f"[!] Failed to get disassembly for '{func_name}'")
             idc.qexit(1)
             return
 
-        print(f"[+] Got disassembly for '{func_name}'")
-
-        # 获取 F5 伪代码
-        pseudocode = get_function_pseudocode(func_ea)
-        if pseudocode:
-            print(f"[+] Got pseudocode for '{func_name}'")
+        if disasm_lines:
+            print(f"[+] Got disassembly for '{func_name}' (limited to {disasm_lines} lines)")
         else:
-            print(f"[*] No pseudocode available for '{func_name}' (Hex-Rays may not be available)")
+            print(f"[+] Got disassembly for '{func_name}'")
+
+        # 根据 no_procedure 决定是否获取伪代码
+        if no_procedure:
+            pseudocode = None
+            print(f"[*] Skipping pseudocode (--no_procedure)")
+        else:
+            # 获取 F5 伪代码
+            pseudocode = get_function_pseudocode(func_ea)
+            if pseudocode:
+                print(f"[+] Got pseudocode for '{func_name}'")
+            else:
+                print(f"[*] No pseudocode available for '{func_name}' (Hex-Rays may not be available)")
 
         # 导出结果
         export_function_info(func_name, func_ea, disasm_code, output_path, pseudocode)
