@@ -441,18 +441,29 @@ def format_prompt(template, ref_data, rev_data):
     return re.sub(pattern, replace_placeholder, template)
 
 
-def extract_unmapped_symbols(procedure_text):
+def extract_unmapped_symbols(procedure_text, disasm_code=None):
     """
     从反汇编代码中提取未映射的符号
 
     Args:
-        procedure_text: 反汇编代码文本
+        procedure_text: procedure 文本（伪代码）
+        disasm_code: disasm_code 文本（反汇编代码），可选
 
     Returns:
         未映射符号的集合 (sub_xxx, loc_xxx 等)
     """
     pattern = r'\b(sub_[0-9A-Fa-f]+|loc_[0-9A-Fa-f]+)\b'
-    return set(re.findall(pattern, procedure_text))
+    symbols = set()
+    
+    # 从 procedure 提取
+    if procedure_text:
+        symbols.update(re.findall(pattern, procedure_text))
+    
+    # 从 disasm_code 提取
+    if disasm_code:
+        symbols.update(re.findall(pattern, disasm_code))
+    
+    return symbols
 
 
 def call_llm_for_mapping(prompt, provider, api_key, api_base, model, debug=False):
@@ -697,16 +708,11 @@ def main():
     ref_data = load_yaml_data(ref_yaml_path)
     rev_data = load_yaml_data(rev_yaml_path)
 
-    if not ref_data.get("procedure"):
-        print(f"Error: 参考版本 YAML 的 procedure 为空: {ref_yaml_path}")
-        sys.exit(1)
-
-    if not rev_data.get("procedure"):
-        print(f"Error: 待分析版本 YAML 的 procedure 为空: {rev_yaml_path}")
-        sys.exit(1)
-
-    # 检查是否有需要映射的符号
-    unmapped_symbols = extract_unmapped_symbols(rev_data.get("procedure", ""))
+    # 检查是否有需要映射的符号（从 procedure 和 disasm_code 中提取）
+    unmapped_symbols = extract_unmapped_symbols(
+        rev_data.get("procedure", ""),
+        rev_data.get("disasm_code", "")
+    )
     if not unmapped_symbols:
         print(f"[*] 待分析版本没有未映射的符号 (sub_xxx, loc_xxx)，无需处理")
         sys.exit(0)
